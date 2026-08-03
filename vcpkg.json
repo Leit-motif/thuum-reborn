@@ -1,0 +1,17 @@
+{
+  "name": "shout-mco-engine",
+  "version-semver": "0.1.0",
+  "description": "Shouts for MCO -- chain any shout animation into an MCO attack",
+  "dependencies": [
+    "directxmath",
+    "directxtk",
+    "fmt",
+    "nlohmann-json",
+    "rapidcsv",
+    "simpleini",
+    "spdlog",
+    "toml11",
+    "xbyak"
+  ],
+  "builtin-baseline": "ee12231b20c95013c6638d845d04c91559a1d1ff"
+}
