@@ -1,7 +1,9 @@
-build/
-dist/
-release/
-extern/
-out/
+# Anchored with a leading slash, deliberately. An unanchored `release/` matches at ANY depth and
+# silently swallowed docs/release/README.txt -- the readme that ships inside the download.
+/build/
+/dist/
+/release/
+/extern/
+/out/
 .vs/
 *.user
