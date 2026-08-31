@@ -9,7 +9,10 @@ project(
 	# Bumped the moment shipped src/ moves past the last release rather than at the next one. A
 	# window where two different binaries both called themselves 1.0.0 is what that rule cost.
 	VERSION 1.0.4
-	DESCRIPTION "Shouts for MCO"
+	# The PUBLIC name, settled 2026-08-29. The version resource stamps FileDescription from
+	# PROJECT_NAME instead, so this string never reaches the binary -- but it is what a reader
+	# of this file takes the mod to be called.
+	DESCRIPTION "Thu'um Reborn"
 	LANGUAGES CXX
 )
 

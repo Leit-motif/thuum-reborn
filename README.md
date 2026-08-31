@@ -42,7 +42,7 @@ SKSE64, Address Library, Nemesis, Payload Interpreter, Open Animation Replacer, 
 State Behavior Framework. One Click Power Attack NG is optional and auto-detected.
 
 **SKSE Menu Framework is optional.** With it installed the mod registers an in-game page under
-*Shouts for MCO* for tuning the feel values live; without it the plugin logs one line and the INI
+*Thu'um Reborn* for tuning the feel values live; without it the plugin logs one line and the INI
 is the whole configuration surface. The menu writes that same INI, so the two never disagree.
 
 ## Build
@@ -89,7 +89,8 @@ driver author does not need this repository.
 
 `ShoutMCO` is the internal identifier: it fixes `ShoutMCO.dll`, `ShoutMCO.ini`, the SKSE log
 filename and the ABI header. *Thu'um Reborn* is the public name. The two are deliberately
-different, and some artifacts still carry the earlier public name *Shouts for MCO*.
+different and both are permanent: the internal one is what a driver links against, so it does
+not follow the public one when that changes.
 
 ## Licence
 

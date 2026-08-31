@@ -262,6 +262,21 @@ namespace ShoutMCO {
             if (!verdict.hold) {
                 // Nothing to queue behind -- no live MCO attack and no open shout chain window --
                 // so the press is not ours to take.
+                //
+                // TRACED, BECAUSE THIS BRANCH USED TO SAY NOTHING AND THAT BROKE THIS FILE'S OWN
+                // RULE: a press must not vanish with nothing in the trace. It left `>>> SHOUT KEY
+                // down` as the last word on a press, which reads identically whether the engine
+                // swallowed it and lost it or handed it straight to the game. A shout pressed 63 ms
+                // into a stagger produced exactly that shape -- the game refused it, correctly, and
+                // the log could not say so, which is a whole investigation to rule out a defect
+                // that was never here.
+                //
+                // What this line means for a reader: from here the press belongs to the GAME. Any
+                // reason it does not become a shout -- staggered, mid-killmove, on cooldown, out of
+                // voice -- is vanilla's decision, and this engine never makes it (ADR-0002).
+                SHOUTMCO_TRACE("[{:10.2f}] >>> SHOUT press forwarded -- nothing to wait behind "
+                               "(attack live={}); from here the shout is the game's to allow",
+                               ShoutChainEngine::ElapsedMs(), verdict.attackLive);
                 return false;
             }
 

@@ -44,7 +44,12 @@ Set-StrictMode -Version Latest
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 # The PRODUCT name, owner ruling 2026-08-28. Internal `ShoutMCO` names -- DLL, INI, log filename,
 # every archived trace path -- are deliberately unchanged; only what the player sees carries this.
-$ModName  = "Thu'um - Fully Animated Shouts Reborn"
+# THE PUBLIC NAME, and it is settled: `Thu'um Reborn` (owner, 2026-08-29). This read
+# "Thu'um - Fully Animated Shouts Reborn" -- the candidate that was explicitly NOT taken --
+# and so both the 1.0.3 and 1.0.4 archives shipped under a rejected name. README.md's Naming
+# table is canonical; check it before changing this line, and never let a second alias loose:
+# reading two of these as two mods already reached a release page once.
+$ModName  = "Thu'um Reborn"
 
 # THE ANIMATIONS SHIP INSIDE THIS ZIP. Owner ruling 2026-08-28: "the animations are not a separate
 # file. they will be shipped with the mod." A previous build produced two archives from two scripts;
@@ -277,6 +282,17 @@ Write-Host 'Contents:'
 $entries = [System.IO.Compression.ZipFile]::OpenRead($Archive)
 try {
     $entries.Entries | ForEach-Object { Write-Host ("  {0,-34} {1,9} bytes" -f $_.FullName, $_.Length) }
+    # ZIP ENTRY NAMES MUST USE '/'. APPNOTE 4.4.17 requires it, and Windows PowerShell 5.1's
+    # Compress-Archive writes the Windows separator instead -- pwsh 7 does not. An archive built
+    # under 5.1 opens fine in 7-Zip and MO2, but elsewhere it can land as single files whose NAMES
+    # contain the separator, and it also silently DISARMS the forbidden-file check below, whose
+    # regex is written against '/'. A guard that quietly stops guarding is worse than no guard,
+    # so this runs first.
+    $backslashed = $entries.Entries | Where-Object { $_.FullName.Contains([char]92) }
+    if ($backslashed) {
+        throw "$($backslashed.Count) of $($entries.Entries.Count) archive entries use the Windows path separator. This build ran under $($PSVersionTable.PSEdition) $($PSVersionTable.PSVersion); re-run it with pwsh 7."
+    }
+
     # Belt and braces over the allow-list: assert the outcome, not the intent -- checked by
     # listing the archive rather than by trusting the packaging step.
     $forbidden = $entries.Entries | Where-Object { $_.FullName -match '(?i)(^|/)(Thuum|extern|build|\.scratch)/' -or $_.FullName -match '(?i)\.(pdb|esp|esl|esm|psc|pex)$' }

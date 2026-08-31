@@ -328,7 +328,11 @@ namespace ShoutMCO::TuningMenu {
             return;
         }
 
-        SKSEMenuFramework::SetSection("Shouts for MCO");
+        // THE PUBLIC NAME, and the player reads this one directly. See README.md's Naming table,
+        // which is canonical: `ShoutMCO` stays the internal identifier forever, and the
+        // public name settled as `Thu'um Reborn`. This said "Shouts for MCO", which is two
+        // names superseded.
+        SKSEMenuFramework::SetSection("Thu'um Reborn");
         SKSEMenuFramework::AddSectionItem("Tuning", RenderTuning);
         log::info("[ShoutMCO] tuning menu registered with SKSE Menu Framework");
     }
