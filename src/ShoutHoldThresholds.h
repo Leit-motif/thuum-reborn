@@ -76,7 +76,8 @@ namespace ShoutMCO {
     // ONE GMST, ONE PASS. Idempotent by construction: called again with the same inputs it returns
     // `kLeave`, which is what lets this run at every shout without logging or writing per shout.
     //
-    // `a_wanted` is "the engine is on AND a positive value is configured". `a_current` is what the
+    // `a_wanted` is "the engine is on AND a positive value is configured" -- and since the engine is
+    // always on, in practice it is the second half alone. `a_current` is what the
     // GMST says right now, read fresh every pass -- never cached, because the two things that can
     // move it out from under us both matter:
     //
@@ -114,9 +115,10 @@ namespace ShoutMCO {
             return out;
         }
 
-        // Not wanted. `bEnabled = 0` promises the INI's own "nothing is intercepted", and a GMST
-        // this mod moved is exactly the kind of thing a player ruling it out of a conflict needs
-        // gone -- so an override already standing is UNWOUND here rather than merely not renewed.
+        // Not wanted, which now means the player configured 0. The INI promises that setting the
+        // threshold to 0 leaves the game's own value alone, and a GMST this mod already moved is
+        // exactly what that promise is about -- so an override already standing is UNWOUND here
+        // rather than merely not renewed.
         if (out.state.applied) {
             out.state.applied = false;
             out.action = HoldOverrideAction::kRestore;

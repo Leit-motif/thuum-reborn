@@ -49,7 +49,6 @@ namespace ShoutMCO::TuningMenu {
         // animation-event path and the input thread.
         struct UiState {
             bool  synced = false;
-            bool  enabled = true;
             bool  trace = false;
             bool  shoutWaitsForSwing = true;
             int   chainWindowPct = 45;
@@ -91,7 +90,6 @@ namespace ShoutMCO::TuningMenu {
         void SyncFromFile() {
             Settings::Load();
             const auto settings = Settings::Snapshot();
-            g_ui.enabled = settings->enabled;
             g_ui.trace = settings->trace;
             g_ui.shoutWaitsForSwing = settings->shoutWaitsForSwing;
             g_ui.chainWindowPct = settings->chainWindowPct;
@@ -254,17 +252,6 @@ namespace ShoutMCO::TuningMenu {
 
             ImGuiMCP::SeparatorText("Engine");
 
-            if (ImGuiMCP::Checkbox("Enabled", &g_ui.enabled)) {
-                WriteBool("Engine", "bEnabled", g_ui.enabled);
-            }
-            if (ImGuiMCP::IsItemHovered()) {
-                ImGuiMCP::SetTooltip(
-                    "Off restores stock shouting completely: nothing is intercepted, no chain is "
-                    "started, and the hold thresholds above are put back to whatever your game had.\n\n"
-                    "Turn this off first when tracking down a mod conflict. If the problem is still "
-                    "there, it is not this mod.");
-            }
-
             if (ImGuiMCP::Checkbox("Diagnostic log (takes effect on restart)", &g_ui.trace)) {
                 WriteBool("Engine", "bTrace", g_ui.trace);
             }
@@ -304,7 +291,6 @@ namespace ShoutMCO::TuningMenu {
                 // spelled out again here. A second copy of these numbers is exactly the drift the
                 // settings/INI parity test exists to catch.
                 const Settings defaults{};
-                WriteBool("Engine", "bEnabled", defaults.enabled);
                 WriteBool("Engine", "bTrace", defaults.trace);
                 WriteBool("Chain", "bShoutWaitsForSwing", defaults.shoutWaitsForSwing);
                 WriteInt("Chain", "iChainWindowPct", defaults.chainWindowPct);

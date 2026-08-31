@@ -50,21 +50,23 @@ namespace ShoutMCO {
                 return;
             }
 
-            // "No input is swallowed with `bEnabled = 0`" cannot be observed from outside this DLL.
-            // During an exhale nothing in the graph consumes an attack event (CONTEXT.md), so a
-            // press this hook forwarded, a press it swallowed, and a press the input driver never
-            // delivered all produce the same nothing -- in the game and in the trace alike. The
-            // claim needs a marker on the path actually taken, and this is that path: the branch
-            // where the engine declined the event and the game's own handler receives it.
+            // A FORWARDED PRESS CANNOT BE OBSERVED FROM OUTSIDE THIS DLL. During an exhale nothing
+            // in the graph consumes an attack event (CONTEXT.md), so a press this hook forwarded, a
+            // press it swallowed, and a press that was never delivered all produce the same nothing
+            // -- in the game and in the trace alike. Telling them apart needs a marker on the path
+            // actually taken, and this is that path: the branch where the engine declined the event
+            // and the game's own handler receives it.
             //
             // `shout=` is on the line because the claim is specifically about a press made DURING
             // a live shout. A forward with no shout in flight evidences nothing, since the engine
             // declines that press switched on as readily as off -- and a marker that could not
             // tell the two apart would be an assertion rather than an instrument.
             //
-            // It reads `IsShoutLive()` and NOT the engine's own `shoutActive`. Engine state printed
-            // "shout inactive" 385ms into a live exhale, because `BeginShout` does not run with
-            // `bEnabled = 0` -- blind in precisely the case it was added to evidence.
+            // It reads `IsShoutLive()` and NOT the engine's own `shoutActive`. `BeginShout` returns
+            // early on an ordinary shout the engine holds nothing for -- no shout equipped, most
+            // obviously -- and engine state then prints "shout inactive" hundreds of milliseconds
+            // into a live exhale. A marker whose own field contradicts the thing it records is an
+            // assertion rather than an instrument.
             //
             // Reported BEFORE the call, so a handler that crashes or never returns still leaves
             // the evidence that it was reached.

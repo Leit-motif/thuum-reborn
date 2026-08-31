@@ -527,11 +527,10 @@ namespace ShoutMCO {
 
         // Shout liveness FOR THE TRACE ONLY, read off the graph rather than off engine state.
         //
-        // `g_state.shoutActive` is set in `BeginShoutLocked`, which does not run when
-        // `bEnabled = 0`. So it reads false throughout a perfectly live shout in exactly the
-        // disabled case that marker exists to measure, and the forward-path marker printed "shout
-        // inactive" 385ms after `Voice_SpellFire_Event`. A marker whose own field contradicts the
-        // claim it supports is an assertion, not an instrument.
+        // `g_state.shoutActive` is set in `BeginShoutLocked`, which returns early on any shout the
+        // engine holds nothing for. So it can read false throughout a perfectly live shout, and the
+        // forward-path marker printed "shout inactive" 385ms after `Voice_SpellFire_Event`. A marker
+        // whose own field contradicts the claim it supports is an assertion, not an instrument.
         //
         // `BeginCastVoice` and `shoutStop` reach `Observe` whatever the engine is set to, so this
         // is correct with the engine off. It drives no decision; nothing reads it but the trace.
@@ -2231,8 +2230,8 @@ namespace ShoutMCO {
         // records at most once.
         void RecordNaturalTailLocked() {
             // `shoutActive` as well as the two obvious guards. `spellFiredAtMs` is set whenever
-            // spellfire is seen with the engine enabled, but `BeginShoutLocked` returns early when
-            // it is NOT -- so a shout begun with `bEnabled = 0` and finished with it on would
+            // spellfire is seen, but `BeginShoutLocked` returns early on a shout the engine holds
+            // nothing for -- so a shout that started outside the engine and ended inside it would
             // otherwise record a real interval against a default key, poisoning the bucket that a
             // null `selectedPower` legitimately uses.
             if (!g_state.shoutActive || g_state.cutSent || g_state.spellFiredAtMs <= 0.0) return;
@@ -2537,10 +2536,12 @@ namespace ShoutMCO {
         void BeginShoutLocked(const Settings& a_settings, const SampledCombo& a_live, bool a_wasAttacking,
                               const WindowKey& a_windowKey, Emit& a_emit, bool a_driverCast,
                               bool a_sprinting) {
-            // This early return is also what makes rooting free to switch off. The root
-            // is set below, so `bEnabled = 0` means no lock is ever written and the graph's own
-            // `SHOUT_lock == 0` condition leaves the vanilla `moveStart` transition exactly as it
-            // was. Nothing extra is owed to make the engine's off state behave like vanilla.
+            // VESTIGIAL. `Settings::enabled` is hard-wired true -- the master switch was retired
+            // and nothing parses it any more -- so this never returns. Kept because the field is
+            // read at eleven sites and unpicking them is surgery on proven runtime code for no
+            // gain. If it ever does go, the graph needs nothing: the root is set below, so no
+            // lock is written on this path and `SHOUT_lock == 0` leaves the vanilla `moveStart`
+            // transition exactly as it was.
             if (!a_settings.enabled) return;
 
             // DO NOT ENGAGE WHEN NO SHOUT IS EQUIPPED, BECAUSE THAT IS A DRIVER.
@@ -3617,13 +3618,14 @@ namespace ShoutMCO {
                         // does not live under the lock: a synthetic shout release sleeping on its
                         // thread would otherwise wake up in the loaded session and deliver there.
                         ShoutInputHook::InvalidateReplays();
-                        // A SECOND RELOAD POINT, and the INI's own instructions depend on it.
+                        // A SECOND RELOAD POINT, and it earns its place when shouting itself is
+                        // what has broken.
                         //
-                        // Settings are otherwise re-read only at `BeginCastVoice`. `ShoutMCO.ini`
-                        // tells the player to set `bEnabled = 0` to rule this mod out of a
-                        // conflict -- which is exactly unreachable when what has gone wrong stops
-                        // a shout from starting. Reloading here makes "set it to 0 and reload
-                        // your save" always work, with no restart.
+                        // Settings are otherwise re-read only at `BeginCastVoice`, so every INI
+                        // edit reaches the engine through a shout. That is exactly unreachable
+                        // when whatever has gone wrong stops a shout from starting -- the player
+                        // edits the file and nothing they can do makes it take. Reloading on a
+                        // load makes "edit it and reload your save" always work, with no restart.
                         Settings::Load();
                         break;
                     default:
@@ -3755,7 +3757,7 @@ namespace ShoutMCO {
         const bool isReadyStateExit = tag == "SBF_ReadyStop"sv;
 
         // The per-shout reload, ahead of the snapshot so THIS shout runs on the values just read
-        // -- flipping `bEnabled` in the INI takes effect at the next shout, as the INI documents.
+        // -- an INI edit takes effect at the next shout, as the file documents.
         std::shared_ptr<const Settings> settings;
         if (isBegin) {
             if (Settings::Snapshot()->reloadPerShout) {
@@ -3982,11 +3984,10 @@ namespace ShoutMCO {
             if (isBegin) {
                 // ADR-0006, LINE ONE. Set BEFORE the call, and the ordering is the whole reason the
                 // discriminator keys on this event instead of on the graph's route into the state.
-                // `BeginShoutLocked` returns before `shoutActive` on two paths -- the engine being
-                // off, and no shout equipped -- so a GENUINE ordinary shout can enter the shout
-                // state with the engine holding nothing. Vouching here means those still vouch. Set
-                // it inside the function and `bEnabled = 0` would arm the engine on every shout the
-                // player makes, which is the exact opposite of what the discriminator asks for.
+                // `BeginShoutLocked` returns before `shoutActive` when no shout is equipped, so a
+                // GENUINE ordinary shout can enter the shout state with the engine holding nothing.
+                // Vouching here means those still vouch, which is what the discriminator asks for;
+                // setting it inside the function would tie the vouch to the engine having armed.
                 g_beginSeenPending = true;
                 BeginShoutLocked(*settings, combo, wasAttacking, windowKey, emit, /*driverCast*/ false,
                                  wasSprinting);

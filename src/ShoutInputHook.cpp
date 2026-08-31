@@ -327,8 +327,8 @@ namespace ShoutMCO {
                 // start as the file documents -- this only guarantees the values already loaded are
                 // in the game before the charge starts.
                 //
-                // Unconditional on `bEnabled`, because withdrawing the override when the player
-                // turns the engine off is part of what it does.
+                // Runs on every down edge, not only on ones the engine will act on: withdrawing an
+                // override the player has since configured to 0 is part of what it does.
                 if (a_event->IsDown()) {
                     Settings::ApplyHoldOverrides();
 
@@ -337,8 +337,8 @@ namespace ShoutMCO {
                     // and ahead of `BeginCastVoice`, so it is the last moment the player's sprint
                     // is still the player's rather than something the cast has already undone.
                     //
-                    // Unconditional on `bEnabled`, like the override, because the trace it writes
-                    // is how a disabled-engine control gets a sprint reading at all.
+                    // Runs on every down edge, like the override above, because the trace it writes
+                    // is how a press the engine never acts on gets a sprint reading at all.
                     if (auto* player = RE::PlayerCharacter::GetSingleton()) {
                         ShoutChainEngine::NoteShoutKeyDown(player);
                     }

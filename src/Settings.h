@@ -14,8 +14,8 @@ namespace ShoutMCO {
     //
     // TWO CLASSES OF FIELD LIVE HERE, and the split is deliberate.
     //
-    // Read from `Data/SKSE/Plugins/ShoutMCO.ini` -- EIGHT, and only these eight:
-    //     bEnabled, bTrace, bShoutWaitsForSwing, iChainWindowPct, sPowerSource, iPowerAttackKeycode,
+    // Read from `Data/SKSE/Plugins/ShoutMCO.ini` -- SEVEN, and only these seven:
+    //     bTrace, bShoutWaitsForSwing, iChainWindowPct, sPowerSource, iPowerAttackKeycode,
     //     fWordTwoHoldSec, fWordThreeHoldSec.
     //
     // The last two are the GMST hold-threshold overrides, and they are the first settings here
@@ -89,6 +89,10 @@ namespace ShoutMCO {
         // wait plus ~31% of presses on which its conditions never came true at all. Do not
         // rediscover the ready gate as a fix.
 
+        // NOT CONFIGURABLE, and no longer parsed from anything. The master switch was retired:
+        // the mod is always on, and a player who wants it off deletes the mod folder, which is a
+        // complete uninstall here. The field stays because eleven call sites read it, and
+        // unpicking those is surgery on proven runtime code that this bought nothing.
         bool enabled = true;
 
         // ADR-0006 -- CHAIN OUT OF A DRIVER'S CAST (Spell Hotbar 2).

@@ -65,9 +65,8 @@ namespace ShoutMCO {
         // press marker only -- no decision is taken on it.
         //
         // Deliberately not `g_state.shoutActive`: that is engine state, set in `BeginShout`, which
-        // does not run with `bEnabled = 0` -- so it reads false throughout a live shout in exactly
-        // the disabled case that marker measures. This is driven by `BeginCastVoice` / `shoutStop`,
-        // which arrive whatever the engine is set to.
+        // returns early on any shout the engine holds nothing for -- so it can read false through a
+        // live shout. This is driven by `BeginCastVoice` / `shoutStop`, which arrive regardless.
         [[nodiscard]] static bool IsShoutLive();
 
         // Should a shout pressed right now be queued behind a running attack? Answered from

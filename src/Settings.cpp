@@ -195,15 +195,26 @@ namespace ShoutMCO {
             const auto value = Trim(std::string_view{trimmed}.substr(eq + 1));
             if (key.empty()) continue;
 
-            // EIGHT settings, and deliberately only eight -- see the class comment on `Settings`.
-            // Everything else the engine reads is an internal constant with no parse case, so a
-            // stale hand-edited INI falls through to the warning below and runs on the default
-            // rather than silently moving a measured value.
+            // SEVEN shipped settings, and deliberately only seven -- see the class comment on
+            // `Settings`. Everything else the engine reads is an internal constant with no parse
+            // case, so a stale hand-edited INI falls through to the warning below and runs on the
+            // default rather than silently moving a measured value.
             //
-            // The seventh branch sets nothing: it swallows a retired key so an INI from the
-            // previous release does not warn. Count the assignments, not the branches.
+            // Some branches set nothing: they swallow a retired key so an INI from an earlier
+            // release does not warn. Count the assignments, not the branches.
             if (key == "bEnabled") {
-                s.enabled = ParseBool(value, s.enabled);
+                // RETIRED, AND SILENTLY IGNORED. The mod is always on. A player who wants it
+                // off uninstalls it, which is a complete uninstall here -- no scripts, no
+                // plugin, nothing baked into the save. A master switch bought a debugging
+                // convenience that deleting one folder already provides.
+                //
+                // Consumed rather than dropped, same as the two upgrade-path keys below: this
+                // key was documented in a shipped INI, so falling through to the unknown-key
+                // warning would scold a player about a setting the file itself offered them.
+                //
+                // `Settings::enabled` stays true for every session and the gates reading it
+                // are now unconditional. Removing those is separate surgery on proven runtime
+                // code and is not owed by this change.
             } else if (key == "bChainDriverCasts") {
                 // PARSED BUT NOT SHIPPED -- there is no case for it in
                 // `config/ShoutMCO.ini`, deliberately, and the field's comment in `Settings.h`
@@ -379,8 +390,8 @@ namespace ShoutMCO {
 
         // One `log::info` per actual change, and never one per shout. `ApplyHoldOverrides` returns
         // `kLeave` on every pass after the first, so this fires when the override lands, when the
-        // player retunes the INI between shouts, when a data load clobbers it and it is re-asserted,
-        // and when `bEnabled = 0` unwinds it -- which is the full list of things worth a line.
+        // player retunes the INI between shouts, and when a data load clobbers it and it is
+        // re-asserted -- which is the full list of things worth a line.
         //
         // STARTUP CLASS, NOT TRACE. It is a change this mod made to the player's game settings, so
         // it belongs in the log a bug report carries at `bTrace = 0`.

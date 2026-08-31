@@ -101,7 +101,7 @@ Install with a mod manager and let it load after ADXP I MCO. There is no ESP.
 This mod ships a small Nemesis patch, so run Nemesis after installing it:
 
   1. Open Nemesis Unlimited Behavior Engine through your mod manager.
-  2. Tick "Shouts for MCO" in the patch list.
+  2. Tick "Thu'um Reborn" in the patch list.
   3. Press Update Engine, then Launch Nemesis Behavior Engine.
   4. Make sure the Nemesis output mod is enabled and wins over other behaviour mods.
 
@@ -118,14 +118,10 @@ CONFIGURATION
 SKSE\Plugins\ShoutMCO.ini. Eight settings, all eight listed here, each documented at more
 length in the file itself. Edits take effect on your next shout -- no restart, no new save.
 
-With SKSE Menu Framework installed there is also an in-game page, under "Shouts for MCO", that
+With SKSE Menu Framework installed there is also an in-game page, under "Thu'um Reborn", that
 writes this same file. There is no second settings file and no separate copy to keep in step:
 whichever you use, the other shows it. bTrace is the one exception -- it is read once when the
 game starts, so the menu marks it restart-only.
-
-  bEnabled = 1             0 turns the engine off completely and gives you stock shouting
-                           back without uninstalling. Try this first when isolating a mod
-                           conflict: if the problem survives, it is not this mod.
 
   bTrace = 0               Off, and it should stay off. At 1 it logs every animation event
                            on your character -- megabytes of log and constant disk writes
@@ -164,7 +160,8 @@ game starts, so the menu marks it restart-only.
                            It is the same number in both directions -- raising it also means
                            every two-word shout needs a longer hold. Nothing is saved or
                            edited: the value is written into the running game each time you
-                           shout, and put back if you set bEnabled = 0.
+                           shout, and put back if you set this to 0. Deleting the mod folder
+                           restores your game exactly.
 
   fWordThreeHoldSec = 0    The same for the THIRD word. 0 leaves the game's own 0.9 s alone,
                            which is where it should stay unless you pushed the setting above
