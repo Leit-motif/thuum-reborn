@@ -1,43 +1,68 @@
-# Shouts for MCO
+# Thu'um Reborn
 
-Chain any shout animation into an MCO attack. **Ships no animations** — it is an engine, and it
-works with whatever shout pack you already have.
+Full MCO support for shouts. Press attack during a shout and the attack comes out at once,
+resuming your MCO combo where it left off rather than restarting it; press shout during a swing
+and the swing lands first, so the hit is no longer eaten. Shout during a shout and the first
+one's exhale is cut rather than played out.
 
-This is the source. The mod itself is on Nexus: *Shouts for MCO*, by **Leitmotives**.
+This is the source. The mod is on Nexus as *Thu'um Reborn*, by **Leitmotives**, and it is a
+successor to BOTuser999's
+[Thu'um - Fully Animated Shouts](https://www.nexusmods.com/skyrimspecialedition/mods/50559),
+whose assets it carries with credit. BOTuser999 had no involvement in this.
 
-Press attack during a shout and the attack comes out immediately, resuming your MCO combo where
-it left off rather than restarting it. Press shout during a swing and the swing lands first, so
-the hit is no longer eaten.
+The download is one file: the SKSE plugin, its INI, a Nemesis patch, and the animation pack.
+The engine itself is independent of any particular pack — it never inspects which animation is
+playing — so it also works with whatever shout pack you already have.
+
+Targets Skyrim SE 1.5.97 and AE 1.6.1170. **Not VR** — `ENABLE_SKYRIM_VR` is off, deliberately.
 
 ## How it works
 
-Two transitions that already exist in Skyrim's own shout graph, fired in order: `shoutStop`
-returns the exhale to ready, and ready already accepts `attackStart`. There is no behaviour graph
-patch and no Nemesis run beyond the one your load order already does.
+The chain out of a shout is two transitions the vanilla shout graph already has, fired in order:
+`shoutStop` returns the exhale to ready, and ready already accepts `attackStart`. The window that
+opens on is measured rather than annotated — the engine times `Voice_SpellFire_Event` to
+`shoutStop` on each shout and caches that per shout, stance, draw state and word count, then
+opens the cancel window on the last `iChainWindowPct` percent of the next one.
 
-Because the engine never inspects which animation is playing, it works with any pack without that
-pack's author changing anything. Shout animation packs carry zero annotations — verified across
-137 files from two independent authors — and this is built so that stays true.
+A percentage rather than a fixed count, because clip lengths differ by 4x across packs and even
+within one. At a fixed 300 ms the player was released for 29% of a one-word shout and 7.6% of a
+three-word one, so the longer and heavier the animation the less of its recovery they got back.
 
-Targets Skyrim SE 1.5.97 and AE 1.6.1170. **Not VR** — `ENABLE_SKYRIM_VR` is off, deliberately.
+The reason none of this reads the animation's annotations: shout packs in the wild do not carry
+any. Across 137 files from two independent authors, 133 carry nothing at all and the four
+exceptions carry `animmotion` root-motion entries, which are motion data rather than events.
+Anything built on annotations would require every pack author to re-annotate.
+
+A behaviour patch does ship — `nemesis/` roots the player during the shout, which the graph
+cannot do on its own — so Nemesis is a requirement and a run is needed after installing.
+
+## Requirements
+
+SKSE64, Address Library, Nemesis, Payload Interpreter, Open Animation Replacer, ADXP | MCO, and
+State Behavior Framework. One Click Power Attack NG is optional and auto-detected.
+
+**SKSE Menu Framework is optional.** With it installed the mod registers an in-game page under
+*Shouts for MCO* for tuning the feel values live; without it the plugin logs one line and the INI
+is the whole configuration surface. The menu writes that same INI, so the two never disagree.
 
 ## Build
 
 Requires MSVC 2022, CMake, and a vcpkg toolchain with `VCPKG_ROOT` set.
 
-CommonLibSSE-NG is not vendored here. Clone it into `extern/` first:
-
 ```bash
-git clone --recursive -b ng https://github.com/alandtse/CommonLibVR.git extern/CommonLibSSE-NG
-```
-
-Then:
-
-```bash
+git submodule update --init --recursive
 cmake --preset ALL && cmake --build build --preset ALL-Release
 ```
 
-The build stages `ShoutMCO.dll` into `dist/SKSE/Plugins/`.
+The build stages `ShoutMCO.dll`, `ShoutMCO.ini` and the public `ShoutMCO_CastIntent.h` into
+`dist/`.
+
+The host test suite is a standalone CMake project that pulls in no game SDK:
+
+```bash
+cmake -S tests -B build-tests && cmake --build build-tests --config Release
+ctest --test-dir build-tests -C Release --output-on-failure
+```
 
 ## Package
 
@@ -45,30 +70,36 @@ The build stages `ShoutMCO.dll` into `dist/SKSE/Plugins/`.
 pwsh -File tools/package.ps1
 ```
 
-Builds `release/Shouts for MCO <version>/` and a matching `.zip` from a **named allow-list** of
-files rather than a directory tree, then asserts the archive contents afterwards and fails if
-anything forbidden got in. Version is read from `CMakeLists.txt` and checked against the built
-DLL's own version resource, so the folder name cannot drift from the binary.
+Builds a release folder and a matching `.zip` from a **named allow-list** of files rather than a
+directory tree, then asserts the archive contents afterwards and fails if anything forbidden got
+in. The version is read from `CMakeLists.txt` and checked against the built DLL's own version
+resource, so the folder name cannot drift from the binary.
 
 `-Deploy` installs into an MO2 mods folder. It is opt-in, previews what it will overwrite, and
 prompts before writing. `-ModsRoot` defaults to the author's instance; pass your own.
 
+## Driving a shout from another mod
+
+`include/ShoutMCO_CastIntent.h` is the public ABI. A mod that casts a shout by its own route —
+a hotbar, a controller binding — announces the intent through it, and the engine then treats that
+cast as a shout for chaining purposes. The header ships beside the DLL as well as here, so a
+driver author does not need this repository.
+
 ## Naming
 
-`ShoutMCO` is the internal identifier — it fixes `ShoutMCO.dll`, `ShoutMCO.ini` and the SKSE log
-filename. *Shouts for MCO* is the public name. The two are deliberately different.
-
-## Design decisions
-
-`docs/adr/` records the three that constrain everything else: consume MCO rather than reimplement
-it, never inspect shout cooldown state, and why the chain window is end-relative.
+`ShoutMCO` is the internal identifier: it fixes `ShoutMCO.dll`, `ShoutMCO.ini`, the SKSE log
+filename and the ABI header. *Thu'um Reborn* is the public name. The two are deliberately
+different, and some artifacts still carry the earlier public name *Shouts for MCO*.
 
 ## Licence
 
-Published here to satisfy GPL-3.0: this links CommonLibSSE-NG, whose modding exception covers the
+GPL-3.0 — see [`LICENSE`](LICENSE). This links CommonLibSSE-NG, whose modding exception covers the
 game's own code and not this plugin, so the plugin is a covered work and its source has to reach
-anyone who receives the binary.
+anyone who receives the binary. That is why this repository exists.
 
-GPL-3.0 — see [`LICENSE`](LICENSE). This links CommonLibSSE-NG, which is GPL-3.0 with a modding
-exception. Note that CommonLibSSE-NG's own `LICENSE` file is the *original* CommonLibSSE's MIT and
-is not the licence this builds under; `COPYING` and `EXCEPTIONS.md` are.
+Note that CommonLibSSE-NG's own `LICENSE` file is the *original* CommonLibSSE's MIT and is not the
+licence this builds under; its `COPYING` and `EXCEPTIONS.md` are.
+
+The bundled animations are not covered by that: they come from Thu'um - Fully Animated Shouts,
+whose author permits redistribution and modification with credit and forbids sale. `CREDITS.txt`
+in the release archive names every author whose work travels with it.

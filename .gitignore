@@ -1,9 +1,13 @@
 # Anchored with a leading slash, deliberately. An unanchored `release/` matches at ANY depth and
 # silently swallowed docs/release/README.txt -- the readme that ships inside the download.
 /build/
+/build-tests/
 /dist/
 /release/
-/extern/
 /out/
 .vs/
 *.user
+
+# `extern/` is NOT ignored. It was, and that was the bug: `extern/CommonLibSSE-NG` is a submodule
+# the build needs and `extern/SKSEMenuFramework.h` is a vendored header it compiles, so ignoring
+# the directory shipped a repository that could not configure.

@@ -20,7 +20,8 @@ BEGIN
 			VALUE "FileDescription", "@PROJECT_NAME@"
 			VALUE "FileVersion", "@PROJECT_VERSION@.0"
 			VALUE "InternalName", "@PROJECT_NAME@"
-			VALUE "LegalCopyright", "All rights reserved"
+			VALUE "CompanyName", "Leitmotives"
+			VALUE "LegalCopyright", "Copyright (C) 2026 Leitmotives. Licensed under GPL-3.0-or-later."
 			VALUE "ProductName", "@PROJECT_NAME@"
 			VALUE "ProductVersion", "@PROJECT_VERSION@.0"
 		END

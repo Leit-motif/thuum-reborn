@@ -11,10 +11,10 @@ namespace ShoutMCO {
     // Every acceptance gate in this project is evidenced from a trace, so the tracing is load
     // bearing during development and pure cost afterwards: `Observe` runs on EVERY animation event
     // on the player, and `SCAR_UpdateDummy` alone fires every ~17ms once a weapon is drawn
-    // (CONTEXT.md finding 8). At `bTrace = 1` that is a multi-megabyte log and constant disk I/O
+    // (CONTEXT.md). At `bTrace = 1` that is a multi-megabyte log and constant disk I/O
     // through combat.
     //
-    // The split this enforces, decided in ticket 16:
+    // The split this enforces:
     //
     //   Trace(...)   -- per-event and per-shout lines. Silent at `bTrace = 0`. Every line carrying
     //                   the `[{:10.2f}]` elapsed-time prefix is one of these, which is why the
@@ -34,24 +34,26 @@ namespace ShoutMCO {
     // the logger was set to at some earlier point.
     //
     // Mirrors `spdlog::info`'s own signature, so the emitted line is byte-identical to what
-    // `log::info` produced before -- the archived traces under `.scratch/shout-mco-engine/` stay
-    // comparable with new ones.
+    // `log::info` produced before -- older traces stay comparable with new ones.
     template <class... Args>
     void TraceLine(spdlog::format_string_t<Args...> a_fmt, Args&&... a_args) {
         spdlog::log(spdlog::level::info, a_fmt, std::forward<Args>(a_args)...);
     }
 
-    [[nodiscard]] inline bool TraceEnabled() { return Settings::Get().trace; }
+    // A relaxed atomic read, deliberately: this runs on every animation event from every thread,
+    // and the answer is allowed to be one reload stale -- `bTrace` takes effect at the next
+    // shout, like every other setting.
+    [[nodiscard]] inline bool TraceEnabled() { return Settings::TraceLive(); }
 }
 
 // A MACRO, and deliberately so: the argument expressions must not be evaluated when tracing is off.
 //
 // The first version of this was a plain function that checked `Settings::trace` on entry. C++
 // evaluates arguments BEFORE the call, so that check suppressed the write and nothing else -- every
-// `GraphSummary(actor)` (six graph-variable reads) and every `MotionSummary(actor)` still ran and
+// `GraphSummary(actor)` (graph-variable reads) and every `MotionSummary(actor)` still ran and
 // still formatted a string at `bTrace = 0`. The one place it did not was `Observe`, which carried a
 // hand-written cost guard; the guard was the tell that the API itself was wrong, and the other
-// sites simply did not have one. Caught in cold review 2026-08-03.
+// sites simply did not have one.
 //
 // A function cannot fix this without making every call site pass a lambda. The macro can, it fixes
 // all ~30 sites at once, and it cannot be forgotten at a new one.

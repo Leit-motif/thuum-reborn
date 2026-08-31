@@ -5,8 +5,10 @@
 #include <spdlog/sinks/msvc_sink.h>
 
 #include "AttackInputHook.h"
+#include "CastIntentApi.h"
 #include "ShoutChainEngine.h"
 #include "ShoutInputHook.h"
+#include "TuningMenu.h"
 
 using namespace SKSE;
 using namespace SKSE::log;
@@ -52,6 +54,11 @@ SKSEPluginLoad(const SKSE::LoadInterface* skse) {
     ShoutMCO::ShoutChainEngine::Install();
     ShoutMCO::AttackInputHook::Install();
     ShoutMCO::ShoutInputHook::Install();
+    // Emits the one startup status line for the cast-intent driver API.
+    ShoutMCO::CastIntentApi::Install();
+    // Optional: registers a page when SKSE Menu Framework is installed, and logs one line when
+    // it is not. The INI remains the whole configuration surface either way.
+    ShoutMCO::TuningMenu::Install();
 
     log::info("{} has finished loading.", plugin->GetName());
     return true;

@@ -17,7 +17,7 @@ namespace ShoutMCO {
 
         // The raw-input sink. Registered on the first shout rather than from an SKSE lifecycle
         // message: `BSInputDeviceManager` does not exist at plugin load, and a `kDataLoaded`
-        // listener was observed not to run (2026-07-29), so hanging the sink off a message is a
+        // listener was observed not to run, so hanging the sink off a message is a
         // dependency with no payoff. Idempotent.
         //
         // Carries two jobs: One Click Power Attack's key, and movement input. It is registered
@@ -26,7 +26,7 @@ namespace ShoutMCO {
 
         // Is a movement control down RIGHT NOW? Tracked from the raw input stream rather than read
         // from `PlayerControls::data.moveInputVec`, which reads (0,0) from inside a deferred task
-        // -- the vector is live only during the frame's input phase (finding 14). Bindings come
+        // -- the vector is live only during the frame's input phase. Bindings come
         // from `UserEvents`, so a remapped key or a gamepad stick is covered without a key list of
         // our own.
         [[nodiscard]] static bool IsMovementInputHeld();

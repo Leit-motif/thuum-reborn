@@ -1,13 +1,14 @@
 cmake_minimum_required(VERSION 3.21)
 
 # The project name is the INTERNAL identifier and is deliberately not the mod's public name.
-# It fixes ShoutMCO.dll, ShoutMCO.ini and the SKSE log filename, and every archived trace under
-# .scratch/shout-mco-engine/ plus capture.ps1 itself resolve ShoutMCO.log by that name. The public
-# name -- "Shouts for MCO" -- lives on the MO2 folder, the readme and the Nexus page, which is
-# where a stranger reads it. See ticket 16, step 7.
+# It fixes ShoutMCO.dll, ShoutMCO.ini and the SKSE log filename, and the capture tooling resolves
+# ShoutMCO.log by that name. The public name lives on the MO2 folder, the readme and the Nexus
+# page, which is where a stranger reads it.
 project(
 	ShoutMCO
-	VERSION 1.0.0
+	# Bumped the moment shipped src/ moves past the last release rather than at the next one. A
+	# window where two different binaries both called themselves 1.0.0 is what that rule cost.
+	VERSION 1.0.4
 	DESCRIPTION "Shouts for MCO"
 	LANGUAGES CXX
 )
@@ -118,6 +119,13 @@ target_include_directories(
 	${PROJECT_NAME}
 	PRIVATE
 	${SHOUTMCO_SRC_DIR}
+	# The SHIPPED public headers. Compiled here as well as by any consumer, so the contract
+	# cannot drift from the implementation that serves it.
+	${CMAKE_CURRENT_SOURCE_DIR}/include
+	# Vendored third-party headers. SKSEMenuFramework.h is the menu host's own consumer header:
+	# it resolves the framework through GetProcAddress at runtime, so there is nothing to link
+	# and a missing framework is a null function pointer rather than a load failure.
+	${CMAKE_CURRENT_SOURCE_DIR}/extern
 	${CMAKE_CURRENT_BINARY_DIR}/cmake
 )
 
@@ -136,5 +144,11 @@ add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
 	COMMAND ${CMAKE_COMMAND} -E copy_if_different
 		"${CMAKE_SOURCE_DIR}/config/ShoutMCO.ini"
 		"${CMAKE_SOURCE_DIR}/dist/SKSE/Plugins/ShoutMCO.ini"
+	# The header ships alongside the DLL, so a driver author has the contract without needing
+	# this repository.
+	COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_SOURCE_DIR}/dist/include"
+	COMMAND ${CMAKE_COMMAND} -E copy_if_different
+		"${CMAKE_SOURCE_DIR}/include/ShoutMCO_CastIntent.h"
+		"${CMAKE_SOURCE_DIR}/dist/include/ShoutMCO_CastIntent.h"
 	COMMENT "Staging ShoutMCO to dist/SKSE/Plugins"
 )
