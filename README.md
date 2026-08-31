@@ -22,7 +22,9 @@ The chain out of a shout is two transitions the vanilla shout graph already has,
 `shoutStop` returns the exhale to ready, and ready already accepts `attackStart`. The window that
 opens on is measured rather than annotated — the engine times `Voice_SpellFire_Event` to
 `shoutStop` on each shout and caches that per shout, stance, draw state and word count, then
-opens the cancel window on the last `iChainWindowPct` percent of the next one.
+opens the cancel window on the last `iChainWindowPct` percent of the next one. That is a fixed
+45 and is not offered to players: it trades responsiveness against how much of the shout
+animation you see, which is one number pulling against both things the mod is for.
 
 A percentage rather than a fixed count, because clip lengths differ by 4x across packs and even
 within one. At a fixed 300 ms the player was released for 29% of a one-word shout and 7.6% of a

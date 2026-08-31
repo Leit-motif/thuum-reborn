@@ -232,11 +232,16 @@ namespace ShoutMCO {
         // way, and it is the only reading of movement that holds up inside a deferred task.
         manager->AddEventSink(InputWatcher::GetSingleton());
 
+        // THE KEY IS NOT NAMED HERE, deliberately. This line is written once, when the sink is
+        // registered; the key itself is resolved in `Settings::Load()` on every shout and can
+        // move mid-session when the player rebinds One Click Power Attack. Printing it here left
+        // the log asserting a key the engine had already stopped using -- and a stale line reads
+        // as a current one to whoever opens a bug report. `Settings::Load()` logs the key on the
+        // pass that resolves it, which is the line that is true when it is written.
         const auto  snapshot = Settings::Snapshot();
         const auto& settings = *snapshot;
-        if (settings.KeyToPower() && settings.powerAttackKeycode > 0) {
-            log::info("[ShoutMCO] watching input: movement, and power-attack key {}",
-                      settings.powerAttackKeycode);
+        if (settings.KeyToPower()) {
+            log::info("[ShoutMCO] watching input: movement, and the power-attack key");
         } else {
             log::info("[ShoutMCO] watching input: movement only -- power presses come from the held "
                       "attack button, not a key");

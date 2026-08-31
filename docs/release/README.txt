@@ -115,7 +115,7 @@ than failing quietly, so a missed step costs you a feature and not your game.
 CONFIGURATION
 -------------
 
-SKSE\Plugins\ShoutMCO.ini. Eight settings, all eight listed here, each documented at more
+SKSE\Plugins\ShoutMCO.ini. Three settings, all three listed here, each documented at more
 length in the file itself. Edits take effect on your next shout -- no restart, no new save.
 
 With SKSE Menu Framework installed there is also an in-game page, under "Thu'um Reborn", that
@@ -127,29 +127,9 @@ game starts, so the menu marks it restart-only.
                            on your character -- megabytes of log and constant disk writes
                            during combat. Turn it on only to capture a bug report, then off.
 
-  bShoutWaitsForSwing = 1  A shout pressed mid-attack waits for your swing to land first.
-                           At 0 you get vanilla timing, where that shout cancels the attack
-                           before it connects and the hit is lost.
-
-  iChainWindowPct = 45     How much of the END of a shout you can cancel into an attack, as
-                           a PERCENTAGE of that shout. Press attack during a shout and the
-                           press is remembered immediately; it fires when this window opens.
-                           Smaller = you are held through more of the shout, which is more
-                           committed. Larger = you can break out earlier. 0 = no window, and
-                           the attack fires when the shout ends on its own.
-
-                           A percentage rather than a fixed time, because the mod learns each
-                           animation's length from your own pack the first time you use it.
-                           A fixed number of milliseconds would hand you back the same slice
-                           of a one-word shout and a four-second one, leaving you stuck
-                           longest in the heaviest shouts -- which is backwards.
-
   sPowerSource = auto      Where a power attack press comes from. `auto` uses One Click
                            Power Attack's key if you have it, otherwise a held attack
                            button. Also accepts ocpa, hold, or off.
-
-  iPowerAttackKeycode = -1 -1 reads OCPA's own binding, so there is nothing to set. Put a
-                           scan code here only if some other mod owns your power attack key.
 
   fWordTwoHoldSec = 0.4    How long the shout key must be HELD for the second word, in
                            seconds. This is the fix for a tap that comes out as a two-word
@@ -162,11 +142,6 @@ game starts, so the menu marks it restart-only.
                            edited: the value is written into the running game each time you
                            shout, and put back if you set this to 0. Deleting the mod folder
                            restores your game exactly.
-
-  fWordThreeHoldSec = 0    The same for the THIRD word. 0 leaves the game's own 0.9 s alone,
-                           which is where it should stay unless you pushed the setting above
-                           a long way up. It must be LARGER than fWordTwoHoldSec; a smaller
-                           value is refused and a line in the log says so.
 
 Everything else is fixed internally, and deliberately so: those values were measured in game
 and a wrong one fails silently. In particular there is no power-attack hold time to set --
