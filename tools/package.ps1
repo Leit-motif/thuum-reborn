@@ -42,6 +42,22 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
 $RepoRoot = Split-Path -Parent $PSScriptRoot
+
+# THE GAME MUST BE CLOSED TO DEPLOY, and this is checked BEFORE packaging rather than at the copy.
+# `tools\deploy.ps1` has had this guard from the start; this script did not, and the difference cost
+# a live mod folder: `-Deploy` reached its `Remove-Item -Recurse` with Skyrim running, deleted 371 of
+# 377 files, then failed on the one the game held open. What survived was the locked DLL and the
+# loose top-level files -- every animation and the whole Nemesis patch tree were gone, from a folder
+# the running session was reading.
+#
+# Checked twice: here, so a refusal costs seconds instead of a full stage-and-archive, and again
+# immediately before the delete, because the owner can start the game while this runs.
+function Assert-SkyrimClosed {
+    if (Get-Process -Name 'SkyrimSE' -ErrorAction SilentlyContinue) {
+        throw "Skyrim is running. Close it before deploying -- the running process holds the DLL open, and the replace deletes the target folder first."
+    }
+}
+if ($Deploy) { Assert-SkyrimClosed }
 # The PRODUCT name, owner ruling 2026-08-28. Internal `ShoutMCO` names -- DLL, INI, log filename,
 # every archived trace path -- are deliberately unchanged; only what the player sees carries this.
 # THE PUBLIC NAME, and it is settled: `Thu'um Reborn` (owner, 2026-08-29). This read
@@ -331,6 +347,10 @@ if (-not $Force) {
     $answer = Read-Host 'Proceed? (y/N)'
     if ($answer -ne 'y') { Write-Host 'Aborted.'; return }
 }
+
+# Re-checked here, against the game having been launched during the packaging run above. This is
+# the line that gutted a live folder once; it does not get to run unguarded.
+Assert-SkyrimClosed
 
 if (Test-Path $Target) { Remove-Item $Target -Recurse -Force }
 New-Item -ItemType Directory -Path $Target -Force | Out-Null

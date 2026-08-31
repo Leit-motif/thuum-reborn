@@ -167,10 +167,8 @@ namespace ShoutMCO::TuningMenu {
             if (!g_ui.synced) SyncFromFile();
 
             ImGuiMCP::TextWrapped(
-                "These are the values worth tuning by ear. Each one is written straight into "
-                "SKSE/Plugins/ShoutMCO.ini and takes effect immediately -- no restart, no new save. "
-                "The file keeps its comments, so anything set here can be read back and changed in "
-                "a text editor later.");
+                "Changes save to SKSE/Plugins/ShoutMCO.ini and apply on your next shout. "
+                "No restart, no new save.");
 
             ImGuiMCP::SeparatorText("Chain");
 
@@ -178,12 +176,11 @@ namespace ShoutMCO::TuningMenu {
             bool commit = CommittedNow();
             if (ImGuiMCP::IsItemHovered()) {
                 ImGuiMCP::SetTooltip(
-                    "How much of the END of a shout you can cancel into an attack, as a percentage "
-                    "of that shout.\n\n"
-                    "Smaller = held through more of the shout, more committed. Larger = you can "
-                    "break out earlier, and shout-to-shout chains faster because more of the exhale "
-                    "is cut.\n\n"
-                    "0 = no window: a buffered attack fires when the shout ends on its own.");
+                    "How much of the end of a shout you can cancel into an attack.\n\n"
+                    "Higher = you break out sooner, and shout into shout gets faster.\n"
+                    "Lower = you stay committed to more of the shout.\n\n"
+                    "0 = no cancelling. An attack pressed during a shout fires once the shout "
+                    "finishes.");
             }
             if (commit) WriteInt("Chain", "iChainWindowPct", g_ui.chainWindowPct);
 
@@ -192,22 +189,23 @@ namespace ShoutMCO::TuningMenu {
             }
             if (ImGuiMCP::IsItemHovered()) {
                 ImGuiMCP::SetTooltip(
-                    "On: a shout pressed mid-attack is held until your swing connects, then fires.\n"
-                    "Off: vanilla timing -- the shout starts at once and the swing is lost before "
-                    "it lands.");
+                    "On: a shout pressed mid-attack is held until your swing connects, then "
+                    "fires.\n"
+                    "Off: the shout starts at once and your swing is cancelled before it "
+                    "connects.");
             }
 
             ImGuiMCP::SliderInt("Power combo wait (ms)", &g_ui.powerAdvanceWaitMs, 0, 1000);
             commit = CommittedNow();
             if (ImGuiMCP::IsItemHovered()) {
                 ImGuiMCP::SetTooltip(
-                    "How long the cut waits for MCO's own power-combo advance before going ahead "
-                    "anyway.\n\n"
-                    "0 = do not wait, which is the behaviour before this existed. It only ever arms "
-                    "on the first power attack of a chain; a comboed one has already advanced by "
-                    "the time the hit lands and pays nothing.\n\n"
-                    "The interval it is waiting for measured 102 ms on one clip and 267 ms on "
-                    "another, so a pack with slow power attacks wants the higher end.");
+                    "When you shout out of a power attack, how long to wait for MCO to register "
+                    "the combo step.\n\n"
+                    "0 = do not wait. Your next power attack then starts the combo from the "
+                    "beginning.\n\n"
+                    "Only the first power attack of a chain waits at all. 350 suits most animation "
+                    "packs; raise it if yours are slow and that first power attack keeps getting "
+                    "clipped.");
             }
             if (commit) WriteInt("Chain", "iPowerAdvanceWaitMs", g_ui.powerAdvanceWaitMs);
 
@@ -216,12 +214,14 @@ namespace ShoutMCO::TuningMenu {
             }
             if (ImGuiMCP::IsItemHovered()) {
                 ImGuiMCP::SetTooltip(
-                    "Where a power attack press comes from.\n\n"
-                    "auto = look: One Click Power Attack's key if it is installed, otherwise a held "
+                    "How you make a power attack.\n\n"
+                    "auto = One Click Power Attack's key if it is installed, otherwise a held "
                     "attack button.\n"
-                    "off = no power chaining. Shouts still chain into normal attacks.\n\n"
-                    "Set off if you run a power attack mod this engine does not recognise -- Elden "
-                    "Power Attack is the known case.");
+                    "ocpa = always One Click Power Attack's key.\n"
+                    "hold = always a held attack button.\n"
+                    "off = no power attack chaining. Shouts still chain into normal attacks.\n\n"
+                    "Set this to off if you use Elden Power Attack, or any power attack mod not "
+                    "listed above.");
             }
 
             ImGuiMCP::SeparatorText("Shout");
@@ -231,11 +231,10 @@ namespace ShoutMCO::TuningMenu {
             if (ImGuiMCP::IsItemHovered()) {
                 ImGuiMCP::SetTooltip(
                     "How long the shout key must be held for the second word.\n\n"
-                    "0.40 = default: a tap is reliably ONE word.\n"
-                    "0.20 = vanilla, where a deliberate tap often charges to two.\n"
-                    "0 = leave the game's own value alone.\n\n"
-                    "The same number in both directions: raising it also means every two-word shout "
-                    "needs a longer hold.");
+                    "0.40 = default. A tap is reliably one word.\n"
+                    "0.20 = the game's own value, where a deliberate tap often charges to two.\n"
+                    "0 = leave the game's value alone.\n\n"
+                    "Raising this also means every two-word shout needs a longer hold.");
             }
             if (commit) WriteFloat("Shout", "fWordTwoHoldSec", g_ui.wordTwoHoldSec);
 
@@ -243,10 +242,11 @@ namespace ShoutMCO::TuningMenu {
             commit = CommittedNow();
             if (ImGuiMCP::IsItemHovered()) {
                 ImGuiMCP::SetTooltip(
-                    "0 = default: leave the game's own 0.9 s alone.\n\n"
-                    "Only worth moving if you pushed word two a long way up and want the gap to "
-                    "word three widened to match. It must be LARGER than the word-two hold; a value "
-                    "at or below it is refused and a line in the log says so.");
+                    "How long the shout key must be held for the third word.\n\n"
+                    "0 = default. Leaves the game's own 0.9 s alone.\n\n"
+                    "Worth raising only if you pushed word two well up and want the gap to word "
+                    "three to match. It must be larger than the word-two hold, or it is "
+                    "ignored.");
             }
             if (commit) WriteFloat("Shout", "fWordThreeHoldSec", g_ui.wordThreeHoldSec);
 
@@ -257,28 +257,26 @@ namespace ShoutMCO::TuningMenu {
             }
             if (ImGuiMCP::IsItemHovered()) {
                 ImGuiMCP::SetTooltip(
-                    "RESTART ONLY. This one is latched when the plugin loads, so the box moves and "
-                    "the file changes but this session keeps logging exactly as it was.\n\n"
-                    "On, it records every animation event on your character -- one about every 17 ms "
-                    "with a weapon drawn. Turn it on to capture a bug report, then straight back off.");
+                    "Takes effect after a restart. Ticking it now writes the file, but this "
+                    "session keeps logging as it was.\n\n"
+                    "On, it records every animation event on your character, roughly one every "
+                    "17 ms with a weapon drawn. Turn it on to capture a bug report, then turn it "
+                    "back off.");
             }
 
             const auto settings = Settings::Snapshot();
 
-            ImGuiMCP::SeparatorText("What the engine is running on");
-            ImGuiMCP::Text("Power source resolved to: %s", PowerSourceWord(settings->resolvedPowerSource));
+            ImGuiMCP::SeparatorText("Status");
+            ImGuiMCP::Text("Power attack source in use: %s", PowerSourceWord(settings->resolvedPowerSource));
             ImGuiMCP::Text("Power attack key: %d", settings->powerAttackKeycode);
             ImGuiMCP::Text("Diagnostic log this session: %s", Settings::TraceLive() ? "on" : "off");
-            ImGuiMCP::TextWrapped(
-                "Safety bounds, shown because a bug report wants them and not because they are "
-                "knobs. Each was measured in game, and each fails quietly when wrong -- the wait cap "
-                "sits above the slowest attack in your load order, and lowering it fires a queued "
-                "shout mid-swing.");
-            ImGuiMCP::BulletText("Queued shout released regardless after: %d ms", settings->shoutWaitCapMs);
-            ImGuiMCP::BulletText("Shout abandoned as hung after: %d ms", settings->shoutLivenessCapMs);
-            ImGuiMCP::BulletText("Swallowed attack press released after: %d ms",
+            ImGuiMCP::TextWrapped("Fixed limits. Not settings -- listed so you can quote them in a "
+                                  "bug report.");
+            ImGuiMCP::BulletText("Held shout fires anyway after: %d ms", settings->shoutWaitCapMs);
+            ImGuiMCP::BulletText("Shout treated as stuck after: %d ms", settings->shoutLivenessCapMs);
+            ImGuiMCP::BulletText("Held attack press released after: %d ms",
                                  settings->pressOwnershipCapMs);
-            ImGuiMCP::BulletText("A ready pass still counts as ours for: %d ms", settings->readyWindowMs);
+            ImGuiMCP::BulletText("Ready-state grace period: %d ms", settings->readyWindowMs);
 
             ImGuiMCP::SeparatorText("File");
             if (ImGuiMCP::Button("Reload from file")) {
