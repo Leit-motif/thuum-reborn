@@ -203,7 +203,7 @@ by Ryan-rsm-McKenzie. It is licensed under the GNU General Public License versio
 modding exception, so this mod is GPL-3.0 too -- see the included LICENSE file for the full
 text, the exception, and what it does and does not permit.
 
-Source code, as the licence requires:  https://github.com/Leit-motif/shouts-for-mco
+Source code, as the licence requires:  https://github.com/Leit-motif/thuum-reborn
 You are free to use, modify and redistribute this, including on other sites, provided the
 licence and copyright notices stay intact, you say what you changed, and your version is
 available under the same licence.
