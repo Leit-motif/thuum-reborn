@@ -6,13 +6,12 @@ and the swing lands first, so the hit is no longer eaten. Shout during a shout a
 one's exhale is cut rather than played out.
 
 This is the source. The mod is on Nexus as *Thu'um Reborn*, by **Leitmotives**, and it is a
-successor to BOTuser999's
+successor to BOTuser998's
 [Thu'um - Fully Animated Shouts](https://www.nexusmods.com/skyrimspecialedition/mods/50559),
-whose assets it carries with credit. BOTuser999 had no involvement in this.
+whose assets it carries with credit. BOTuser998 had no involvement in this.
 
 The download is one file: the SKSE plugin, its INI, a Nemesis patch, and the animation pack.
-The engine itself is independent of any particular pack — it never inspects which animation is
-playing — so it also works with whatever shout pack you already have.
+The engine never inspects which animation is playing; the animations ship in the same download.
 
 Targets Skyrim SE 1.5.97 and AE 1.6.1170. **Not VR** — `ENABLE_SKYRIM_VR` is off, deliberately.
 
@@ -40,8 +39,9 @@ cannot do on its own — so Nemesis is a requirement and a run is needed after i
 
 ## Requirements
 
-SKSE64, Address Library, Nemesis, Payload Interpreter, Open Animation Replacer, ADXP | MCO, and
-State Behavior Framework. One Click Power Attack NG is optional and auto-detected.
+SKSE64, Address Library, Nemesis, Payload Interpreter, Open Animation Replacer, ADXP | MCO,
+State Behavior Framework, and SYHO - Shout Your Heart Out. One Click Power Attack NG is optional
+and auto-detected.
 
 **SKSE Menu Framework is optional.** With it installed the mod registers an in-game page under
 *Thu'um Reborn* for tuning the feel values live; without it the plugin logs one line and the INI
@@ -103,6 +103,6 @@ anyone who receives the binary. That is why this repository exists.
 Note that CommonLibSSE-NG's own `LICENSE` file is the *original* CommonLibSSE's MIT and is not the
 licence this builds under; its `COPYING` and `EXCEPTIONS.md` are.
 
-The bundled animations are not covered by that: they come from Thu'um - Fully Animated Shouts,
-whose author permits redistribution and modification with credit and forbids sale. `CREDITS.txt`
-in the release archive names every author whose work travels with it.
+The bundled animations are not covered by that: they come from Thu'um - Fully Animated Shouts
+and SYHO - Shout Your Heart Out. `CREDITS.txt` in the release archive records the provenance and
+permissions for every author whose work travels with it.
