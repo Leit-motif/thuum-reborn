@@ -4,6 +4,7 @@
 #include <atomic>
 #include <cstring>
 
+#include "AttackSeam.h"
 #include "Settings.h"
 #include "ShoutChainEngine.h"
 #include "Trace.h"
@@ -149,11 +150,11 @@ namespace ShoutMCO {
             return true;
         }
 
-        // One Click Power Attack owns its own key and never routes it through
-        // `AttackBlockHandler`, so the only way to see it is the raw input stream. This sink
-        // observes and never consumes -- an input sink cannot swallow anyway, and it does not
-        // need to: OCPA's own attempt lands in the exhale state, where nothing consumes an attack
-        // event.
+        // MOVEMENT ONLY. This sink used to carry a second job -- watching One Click Power
+        // Attack's own key -- and that job is gone: the power press is now seen downstream of the
+        // key, as an outgoing `attackPowerStart*` graph event, which every power-attack source
+        // produces and none of which needs another mod's config read. The sink stays for movement,
+        // which is the one reading that holds up inside a deferred task.
         class InputWatcher : public RE::BSTEventSink<RE::InputEvent*> {
         public:
             static InputWatcher* GetSingleton() {
@@ -181,19 +182,49 @@ namespace ShoutMCO {
                     auto* button = event->AsButtonEvent();
                     if (!button) continue;
 
-                    if (TrackMovement(button)) continue;
-                    if (!button->IsDown()) continue;
-
-                    auto code = static_cast<std::uint32_t>(button->GetIDCode());
-                    // SKSE's numbering, which is also OCPA's: mouse buttons sit above the
-                    // keyboard scan codes.
-                    if (button->device.get() == RE::INPUT_DEVICE::kMouse) code += 256;
-
-                    ShoutChainEngine::OnPowerAttackKey(code);
+                    TrackMovement(button);
                 }
                 return RE::BSEventNotifyControl::kContinue;
             }
         };
+
+        // THE POWER-ATTACK SEAM. `IAnimationGraphManagerHolder::NotifyAnimationGraph`, vfunc 0x1,
+        // on the player -- the one call every power-attack source makes once it has decided the
+        // press was a power attack. Vanilla's held button, One Click Power Attack's key and MCO's
+        // directional variants all arrive here as an `attackPowerStart*` event, so matching the
+        // event rather than the key is what makes the buffer source-agnostic.
+        //
+        // (BFCO does not come through here -- it plays a `TESIdleForm` through `AIProcess::PlayIdle`
+        // instead. That path is deferred to the MCO-to-BFCO migration project by the ticket's own
+        // scope ruling; this seam is the designed-for place to add it.)
+        using NotifyAnimationGraph_t = bool (*)(RE::IAnimationGraphManagerHolder*, const RE::BSFixedString&);
+        NotifyAnimationGraph_t g_originalNotifyAnimationGraph = nullptr;
+
+        bool Hook_NotifyAnimationGraph(RE::IAnimationGraphManagerHolder* a_self,
+                                       const RE::BSFixedString&         a_eventName) {
+            const auto forward = [&] {
+                return g_originalNotifyAnimationGraph
+                           ? g_originalNotifyAnimationGraph(a_self, a_eventName)
+                           : false;
+            };
+
+            // OUR OWN REPLAY GOES STRAIGHT THROUGH. `ExecuteEmits` fires the chained power attack
+            // with this very call, so without the guard the replay would arrive back here as a
+            // fresh press and re-buffer itself forever.
+            if (ScopedOwnEmit::Active()) return forward();
+
+            const char* name = a_eventName.c_str();
+            if (!name || !IsPowerAttackStartEvent(name)) return forward();
+
+            // NOT FORWARDED when the engine takes it. The press is buffered and the engine's own
+            // replay sends the real event after the lock; today the source's attempt lands in the
+            // exhale state where nothing consumes an attack event, so withholding it changes
+            // nothing observable except that the graph no longer sees a dead event.
+            if (ShoutChainEngine::OnPowerAttackEvent(name)) return false;
+
+            return forward();
+        }
+
     }
 
     void AttackInputHook::Install() {
@@ -204,7 +235,19 @@ namespace ShoutMCO {
         g_originalUpdateHeld =
             reinterpret_cast<UpdateHeld_t>(vtbl.write_vfunc(0x5, &Hook_UpdateHeldStateActive));
 
+        // `VTABLE_PlayerCharacter[3]` is the `IAnimationGraphManagerHolder` base. The index is
+        // the order of the polymorphic bases by offset: `TESObjectREFR` is `TESForm` (0x00),
+        // `BSHandleRefObject` (0x20), `BSTEventSink<BSAnimationGraphEvent>` (0x30), then
+        // `IAnimationGraphManagerHolder` (0x38) -- four vtables, which is exactly the length of
+        // `VTABLE_TESObjectREFR`, and every derived class keeps those four first. Slot 0x1 in that
+        // vtable is `NotifyAnimationGraph` (0x0 is the destructor).
+        REL::Relocation<std::uintptr_t> playerVtbl{RE::VTABLE_PlayerCharacter[3]};
+        g_originalNotifyAnimationGraph = reinterpret_cast<NotifyAnimationGraph_t>(
+            playerVtbl.write_vfunc(0x1, &Hook_NotifyAnimationGraph));
+
         log::info("[ShoutMCO] attack-input hooks installed");
+        log::info("[ShoutMCO] power-attack seam installed on NotifyAnimationGraph "
+                  "(source-agnostic; OCPA key watch removed)");
     }
 
     void AttackInputHook::EnsureInputWatcher() {
@@ -232,20 +275,8 @@ namespace ShoutMCO {
         // way, and it is the only reading of movement that holds up inside a deferred task.
         manager->AddEventSink(InputWatcher::GetSingleton());
 
-        // THE KEY IS NOT NAMED HERE, deliberately. This line is written once, when the sink is
-        // registered; the key itself is resolved in `Settings::Load()` on every shout and can
-        // move mid-session when the player rebinds One Click Power Attack. Printing it here left
-        // the log asserting a key the engine had already stopped using -- and a stale line reads
-        // as a current one to whoever opens a bug report. `Settings::Load()` logs the key on the
-        // pass that resolves it, which is the line that is true when it is written.
-        const auto  snapshot = Settings::Snapshot();
-        const auto& settings = *snapshot;
-        if (settings.KeyToPower()) {
-            log::info("[ShoutMCO] watching input: movement, and the power-attack key");
-        } else {
-            log::info("[ShoutMCO] watching input: movement only -- power presses come from the held "
-                      "attack button, not a key");
-        }
+        log::info("[ShoutMCO] watching input: movement only -- a power press is seen on the "
+                  "animation graph, not on the input stream");
     }
 
     bool AttackInputHook::IsMovementInputHeld() { return g_movementHeld.Any(); }

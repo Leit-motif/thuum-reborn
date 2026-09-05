@@ -56,54 +56,7 @@ namespace ShoutMCO {
         // overloads below stay: `Log()` still reports these values, which is the point of demoting
         // them rather than deleting them.
 
-        // One Click Power Attack's own config, so its key is configured in one place rather than
-        // copied into ours and left to drift. The player's MCM overrides come first; OCPA's
-        // shipped defaults are the fallback, since a player who never opened the MCM has no
-        // settings file at all.
-        int ReadOcpaKeycode() {
-            static constexpr const char* kPaths[]{
-                "Data/MCM/Settings/OCPA.ini",
-                "Data/MCM/Config/OCPA/settings.ini",
-            };
-
-            for (const auto* path : kPaths) {
-                std::ifstream in(path);
-                if (!in) continue;
-
-                std::string line;
-                while (std::getline(in, line)) {
-                    const auto trimmed = Trim(line);
-                    const auto eq = trimmed.find('=');
-                    if (eq == std::string::npos) continue;
-                    if (Trim(std::string_view{trimmed}.substr(0, eq)) != "iKeycode") continue;
-
-                    // The first iKeycode is [General]'s; [DualAttack]'s comes later.
-                    const auto code = ParseInt(Trim(std::string_view{trimmed}.substr(eq + 1)), 0);
-                    // Once, then only on a change. This runs on every shout via the per-shout
-                    // reload, and OCPA's key does not move between shouts -- see Settings::Log().
-                    //
-                    // Atomic because `Load()` is reached from `BeginShout`, i.e. from the
-                    // animation-graph event path, and that path is NOT single-threaded: one chain
-                    // trace carries six distinct thread ids. `exchange` rather than a
-                    // read-then-write, so two threads cannot both decide to log.
-                    static std::atomic<int> lastCode{-1};
-                    if (lastCode.exchange(code) != code) {
-                        log::info("[ShoutMCO] power key {} read from {}", code, path);
-                    }
-                    return code;
-                }
-            }
-
-            static std::atomic<bool> warnedNoOcpa{false};
-            if (!warnedNoOcpa.exchange(true)) {
-                log::info("[ShoutMCO] no OCPA config found -- treating this as a load order without it");
-            }
-            return 0;
-        }
-
         Settings::PowerSource ParsePowerSource(const std::string& a_value, Settings::PowerSource a_fallback) {
-            if (a_value == "auto") return Settings::PowerSource::kAuto;
-            if (a_value == "ocpa") return Settings::PowerSource::kOcpa;
             if (a_value == "hold") return Settings::PowerSource::kHold;
             if (a_value == "off") return Settings::PowerSource::kOff;
             log::warn("[ShoutMCO] unknown sPowerSource '{}'; keeping the previous value", a_value);
@@ -112,10 +65,6 @@ namespace ShoutMCO {
 
         std::string_view Describe(Settings::PowerSource a_source) {
             switch (a_source) {
-                case Settings::PowerSource::kAuto:
-                    return "auto"sv;
-                case Settings::PowerSource::kOcpa:
-                    return "ocpa"sv;
                 case Settings::PowerSource::kHold:
                     return "hold"sv;
                 default:
@@ -298,8 +247,6 @@ namespace ShoutMCO {
                 // an INI carrying this key is old enough to be worth telling its owner about.
             } else if (key == "sPowerSource") {
                 s.powerSource = ParsePowerSource(value, s.powerSource);
-            } else if (key == "iPowerAttackKeycode") {
-                s.powerAttackKeycode = ParseInt(value, s.powerAttackKeycode);
             } else {
                 if (!unknownKeys.empty()) unknownKeys += ", ";
                 unknownKeys += key;
@@ -326,32 +273,6 @@ namespace ShoutMCO {
                 log::warn("{} -- these are not settings this version reads; it is running on the "
                           "built-in default for each", warning);
             }
-        }
-
-        // Resolve the power source by looking at what is actually installed, so neither answer
-        // has to be assumed and no key is hardcoded.
-        if (s.powerSource == Settings::PowerSource::kOcpa || s.powerSource == Settings::PowerSource::kAuto) {
-            if (s.powerAttackKeycode < 0) {
-                s.powerAttackKeycode = ReadOcpaKeycode();
-            }
-        } else {
-            s.powerAttackKeycode = 0;
-        }
-
-        switch (s.powerSource) {
-            case Settings::PowerSource::kAuto:
-                s.resolvedPowerSource = s.powerAttackKeycode > 0 ? Settings::PowerSource::kOcpa
-                                                                 : Settings::PowerSource::kHold;
-                break;
-            case Settings::PowerSource::kOcpa:
-                // Asked for explicitly but no key found: fall back rather than silently drop the
-                // whole direction.
-                s.resolvedPowerSource = s.powerAttackKeycode > 0 ? Settings::PowerSource::kOcpa
-                                                                 : Settings::PowerSource::kHold;
-                break;
-            default:
-                s.resolvedPowerSource = s.powerSource;
-                break;
         }
 
         Publish(s);
@@ -502,17 +423,16 @@ namespace ShoutMCO {
             // harness needs to show which side of that switch the run was on -- it is the
             // difference between "the engine did not arm" and "the engine was not allowed to".
             "[ShoutMCO] config (ini): enabled={} trace={} shoutWaitsForSwing={} chainWindowPct={} "
-            "powerSource={}->{} "
+            "powerSource={} "
             // As the FILE says them, not as the game got them -- `ApplyHoldOverrides` logs the
             // landed values separately, and a bug report wants both so a refused or clamped value
             // is visible as the difference between the two lines.
             "wordTwoHoldSec={:.3f} wordThreeHoldSec={:.3f} "
-            "powerKey={} chainDriverCasts={} powerAdvanceWaitMs={} | (internal): reloadPerShout={} window={} ('{}') bufferMs={} cut='{}' "
+            "chainDriverCasts={} powerAdvanceWaitMs={} | (internal): reloadPerShout={} window={} ('{}') bufferMs={} cut='{}' "
             "attack='{}' power='{}' holdSecs={:.2f} resume={} readyWindowMs={} motionWatchMs={} "
             "waitCapMs={} pressCapMs={} shoutCapMs={}",
             enabled, trace, shoutWaitsForSwing, chainWindowPct, Describe(powerSource),
-            Describe(resolvedPowerSource), wordTwoHoldSec, wordThreeHoldSec,
-            powerAttackKeycode, chainDriverCasts, powerAdvanceWaitMs, reloadPerShout, Describe(windowSource),
+            wordTwoHoldSec, wordThreeHoldSec, chainDriverCasts, powerAdvanceWaitMs, reloadPerShout, Describe(windowSource),
             windowEvent, bufferMs,
             cutEvent, attackEvent, powerAttackEvent, powerHoldSeconds, Describe(resumeMode),
             readyWindowMs, motionWatchMs, shoutWaitCapMs, pressOwnershipCapMs, shoutLivenessCapMs);

@@ -11,6 +11,7 @@
 
 #include "AttackInputHook.h"
 #include "AttackQueuedRelease.h"
+#include "AttackSeam.h"
 #include "CastIntentApi.h"
 #include "ClipOwnedRelease.h"
 #include "EngineLock.h"
@@ -3259,7 +3260,13 @@ namespace ShoutMCO {
                         // and NOT in `BeginShoutLocked`, which writes only the lock -- and it is
                         // explicitly cleared in `ClearRootLockLocked`, so that is already true;
                         // this comment is why.
-                        const bool accepted = actor->NotifyAnimationGraph(kLeaveLocomotionEvent);
+                        // OUR OWN emission, marked as such so the power-attack seam on
+                    // `NotifyAnimationGraph` forwards it instead of reading the replay back as a
+                    // fresh press. Outside the engine lock, as every emission here is.
+                    const bool accepted = [&] {
+                        ScopedOwnEmit own;
+                        return actor->NotifyAnimationGraph(kLeaveLocomotionEvent);
+                    }();
                         SHOUTMCO_TRACE("[{:10.2f}] >>> ROOT wrote {}={} and fired '{}' accepted={}",
                               ElapsedMs(), kRootLockVariable, value, kLeaveLocomotionEvent, accepted);
                     } else {
@@ -3273,7 +3280,13 @@ namespace ShoutMCO {
                 // Deferred like every other emission: never call into the graph from inside its
                 // own event dispatch.
                 Defer(a_actor, [](RE::Actor* actor) {
-                    const bool accepted = actor->NotifyAnimationGraph("attackStop");
+                    // OUR OWN emission, marked as such so the power-attack seam on
+                    // `NotifyAnimationGraph` forwards it instead of reading the replay back as a
+                    // fresh press. Outside the engine lock, as every emission here is.
+                    const bool accepted = [&] {
+                        ScopedOwnEmit own;
+                        return actor->NotifyAnimationGraph("attackStop");
+                    }();
                     SHOUTMCO_TRACE("[{:10.2f}] >>> CANCEL fired 'attackStop' accepted={}  || {}", ElapsedMs(),
                           accepted, GraphSummary(actor));
                 });
@@ -3281,7 +3294,13 @@ namespace ShoutMCO {
 
             if (a_emit.cut) {
                 Defer(a_actor, [cut = a_emit.cutEvent](RE::Actor* actor) {
-                    const bool accepted = actor->NotifyAnimationGraph(cut);
+                    // OUR OWN emission, marked as such so the power-attack seam on
+                    // `NotifyAnimationGraph` forwards it instead of reading the replay back as a
+                    // fresh press. Outside the engine lock, as every emission here is.
+                    const bool accepted = [&] {
+                        ScopedOwnEmit own;
+                        return actor->NotifyAnimationGraph(cut);
+                    }();
                     SHOUTMCO_TRACE("[{:10.2f}] >>> CHAIN cut '{}' accepted={}  || {}", ElapsedMs(), cut,
                           accepted, GraphSummary(actor));
                 });
@@ -3347,7 +3366,13 @@ namespace ShoutMCO {
                     // the control-map suppression this branch used to make is gone,
                     // and the graph-side root belongs to the shout state, not to the chained swing.
 
-                    const bool accepted = actor->NotifyAnimationGraph(fireEvt);
+                    // OUR OWN emission, marked as such so the power-attack seam on
+                    // `NotifyAnimationGraph` forwards it instead of reading the replay back as a
+                    // fresh press. Outside the engine lock, as every emission here is.
+                    const bool accepted = [&] {
+                        ScopedOwnEmit own;
+                        return actor->NotifyAnimationGraph(fireEvt);
+                    }();
                     SHOUTMCO_TRACE("[{:10.2f}] >>> CHAIN fired '{}' ({}) accepted={}  || {}", ElapsedMs(), fireEvt,
                           Describe(kind), accepted, GraphSummary(actor));
 
@@ -4487,10 +4512,8 @@ namespace ShoutMCO {
         return ShoutVerdict{};
     }
 
-    bool ShoutChainEngine::OnPowerAttackKey(std::uint32_t a_keycode) {
+    bool ShoutChainEngine::OnPowerAttackEvent(std::string_view a_eventName) {
         const auto settings = Settings::Snapshot();
-        if (!settings->KeyToPower() || settings->powerAttackKeycode <= 0) return false;
-        if (a_keycode != static_cast<std::uint32_t>(settings->powerAttackKeycode)) return false;
 
         auto* player = RE::PlayerCharacter::GetSingleton();
         if (!player) return false;
@@ -4508,16 +4531,16 @@ namespace ShoutMCO {
             // this engine at all, and a control carrying no movement reading of its own cannot
             // evidence "a movement key was held" -- it can only assert it in a header, so the
             // instrument has to reach it.
-            SHOUTMCO_TRACE("[{:10.2f}] >>> POWER KEY {} seen, shout {}  || {}", ElapsedMs(), a_keycode,
+            SHOUTMCO_TRACE("[{:10.2f}] >>> POWER EVENT \"{}\" seen, shout {}  || {}", ElapsedMs(), a_eventName,
                   g_state.shoutActive ? "active"sv : "inactive"sv, summary);
 
             // See `OnAttackButton`: the queued snapshot, not the shorter-lived held-input latch,
             // spans `inRdy` through the replay and up to `BeginCastVoice`.
             const bool queuedShout = !g_state.shoutActive && g_queuedResume.valid;
             if (settings->enabled && (g_state.shoutActive || queuedShout)) {
-                // A dedicated power key is unambiguous the moment it goes down -- there is no
-                // hold to wait out, which is why this direction can fire immediately where the
-                // hold path cannot.
+                // An outgoing `attackPowerStart*` is unambiguous the moment it is sent -- whichever
+                // mod decided it, the decision is already made, so this direction fires immediately
+                // where the hold path has to wait its threshold out.
                 g_state.pressPending = true;
                 g_state.pressResolved = true;
                 g_state.pressedAtMs = ElapsedMs();
@@ -4525,10 +4548,10 @@ namespace ShoutMCO {
                 g_state.waitingForShoutStart = queuedShout;
 
                 if (queuedShout) {
-                    SHOUTMCO_TRACE("[{:10.2f}] >>> POWER KEY {} buffered (waiting for queued shout to start)",
-                          ElapsedMs(), a_keycode);
+                    SHOUTMCO_TRACE("[{:10.2f}] >>> POWER EVENT \"{}\" buffered (waiting for queued shout "
+                          "to start)", ElapsedMs(), a_eventName);
                 } else {
-                    SHOUTMCO_TRACE("[{:10.2f}] >>> POWER KEY {} (window {})", ElapsedMs(), a_keycode,
+                    SHOUTMCO_TRACE("[{:10.2f}] >>> POWER EVENT \"{}\" (window {})", ElapsedMs(), a_eventName,
                           g_state.windowOpen ? "open"sv : "shut"sv);
                 }
                 TryFireChainLocked(*settings, emit);

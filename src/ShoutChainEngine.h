@@ -38,11 +38,16 @@ namespace ShoutMCO {
         static bool OnAttackButton(const RE::ButtonEvent& a_event, float a_gameHoldThreshold);
         static bool OnAttackHold(const RE::ButtonEvent& a_event, float a_gameHoldThreshold);
 
-        // One Click Power Attack's key, seen on the raw input stream. Observed, never swallowed:
-        // OCPA acts on the key itself, but its attempt lands in the exhale state where nothing
-        // consumes an attack event, so it is a no-op and our chain is the only
-        // effect. Returns true if the press was buffered for a queued shout or started a chain.
-        static bool OnPowerAttackKey(std::uint32_t a_keycode);
+        // A power press, seen DOWNSTREAM OF THE KEY as an outgoing `attackPowerStart*` graph
+        // event (`AttackSeam.h`). Every power-attack source -- vanilla's hold, One Click Power
+        // Attack's key, MCO's directional variants -- reaches this same seam, so nothing here
+        // reads another mod's config or knows a key code.
+        //
+        // Returns true if the press was buffered for a queued shout or started a chain, in which
+        // case the caller does NOT forward the event: the engine's own replay sends the real one
+        // after the lock, and the source's attempt would otherwise land in the exhale state where
+        // nothing consumes an attack event anyway.
+        static bool OnPowerAttackEvent(std::string_view a_eventName);
 
         // Milliseconds since the first observed graph event. Shared so every line in the trace is
         // on one clock, whichever hook wrote it.

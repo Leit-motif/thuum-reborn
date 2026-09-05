@@ -12,7 +12,9 @@ namespace ShoutMCO {
     class AttackInputHook {
     public:
         // Both `AttackBlockHandler` vfuncs: 0x4 `ProcessButton` for the press and release edges,
-        // 0x5 `UpdateHeldStateActive` for the hold in between.
+        // 0x5 `UpdateHeldStateActive` for the hold in between -- plus the power-attack seam,
+        // `IAnimationGraphManagerHolder::NotifyAnimationGraph` (slot 0x1 of
+        // `VTABLE_PlayerCharacter[3]`), where every power-attack source's press looks the same.
         static void Install();
 
         // The raw-input sink. Registered on the first shout rather than from an SKSE lifecycle
@@ -20,8 +22,8 @@ namespace ShoutMCO {
         // listener was observed not to run, so hanging the sink off a message is a
         // dependency with no payoff. Idempotent.
         //
-        // Carries two jobs: One Click Power Attack's key, and movement input. It is registered
-        // even with no OCPA key to watch, because the movement half is always needed.
+        // ONE job now: movement input. The power key it used to watch is gone -- a power press
+        // is seen on the graph seam instead, downstream of whichever mod owns the key.
         static void EnsureInputWatcher();
 
         // Is a movement control down RIGHT NOW? Tracked from the raw input stream rather than read
