@@ -218,20 +218,15 @@ namespace ShoutMCO {
 
             // ALWAYS FORWARDED, whether or not the engine buffers it. The first cut of this seam
             // returned false when the engine took the press, on the theory that the source's own
-            // attempt lands in the exhale state where nothing consumes it. Owner-driven 2026-09-05:
+            // attempt lands in the exhale state where nothing consumes it. Owner-driven:
             // a shout queued behind a held power attack replayed its press and never started, the
             // engine's queued-shout state went stale, and the NEXT held power attack was swallowed
             // here for 26 s until the watchdog handed it back to a sheathed weapon. The old OCPA key
             // watch could not swallow, which is what made it fail-safe; this keeps that property.
             // During a live shout the forwarded event is inert exactly as before, and the buffer
             // stays additive.
-            const bool taken = ShoutChainEngine::OnPowerAttackEvent(name);
-            const bool accepted = forward();
-            // The graph took it, so the game played this press: drop the buffered copy rather
-            // than replay it later (the watchdog did exactly that, five seconds late, when a
-            // cooldown left a queued shout that could never start).
-            if (taken && accepted) ShoutChainEngine::OnPowerAttackEventPlayed(name);
-            return accepted;
+            ShoutChainEngine::OnPowerAttackEvent(name);
+            return forward();
         }
 
     }

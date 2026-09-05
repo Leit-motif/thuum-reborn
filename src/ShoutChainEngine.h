@@ -49,13 +49,6 @@ namespace ShoutMCO {
         // nothing consumes an attack event anyway.
         static bool OnPowerAttackEvent(std::string_view a_eventName);
 
-        // The forwarded power event was ACCEPTED by the graph: the game has already played that
-        // press, so a copy buffered by `OnPowerAttackEvent` must not be replayed on top of it. A
-        // live shout refuses the event (nothing in the exhale state consumes an attack), so this
-        // only fires when the buffer was taken against a queued shout that had not started --
-        // the stale-queue case, observed 2026-09-05 as a second power attack five seconds late.
-        static void OnPowerAttackEventPlayed(std::string_view a_eventName);
-
         // Milliseconds since the first observed graph event. Shared so every line in the trace is
         // on one clock, whichever hook wrote it.
         [[nodiscard]] static double ElapsedMs();

@@ -4534,10 +4534,13 @@ namespace ShoutMCO {
             SHOUTMCO_TRACE("[{:10.2f}] >>> POWER EVENT \"{}\" seen, shout {}  || {}", ElapsedMs(), a_eventName,
                   g_state.shoutActive ? "active"sv : "inactive"sv, summary);
 
-            // See `OnAttackButton`: the queued snapshot, not the shorter-lived held-input latch,
-            // spans `inRdy` through the replay and up to `BeginCastVoice`.
-            const bool queuedShout = !g_state.shoutActive && g_queuedResume.valid;
-            if (settings->enabled && (g_state.shoutActive || queuedShout)) {
+            // LIVE SHOUT ONLY. A power press while a shout is merely QUEUED behind an attack is
+            // not buffered any more: the seam forwards the event, so the game plays the power
+            // attack and the queued shout stays queued behind it, which is what the button did.
+            // Buffering it meant waiting on a shout that could never start (a shout on cooldown)
+            // and the watchdog replaying the press five seconds late. Owner: "i kind've don't care
+            // about buffering if it's causing more problems than the edge-case it solves."
+            if (settings->enabled && g_state.shoutActive) {
                 // An outgoing `attackPowerStart*` is unambiguous the moment it is sent -- whichever
                 // mod decided it, the decision is already made, so this direction fires immediately
                 // where the hold path has to wait its threshold out.
@@ -4545,15 +4548,10 @@ namespace ShoutMCO {
                 g_state.pressResolved = true;
                 g_state.pressedAtMs = ElapsedMs();
                 g_state.pressKind = AttackKind::kPower;
-                g_state.waitingForShoutStart = queuedShout;
+                g_state.waitingForShoutStart = false;
 
-                if (queuedShout) {
-                    SHOUTMCO_TRACE("[{:10.2f}] >>> POWER EVENT \"{}\" buffered (waiting for queued shout "
-                          "to start)", ElapsedMs(), a_eventName);
-                } else {
-                    SHOUTMCO_TRACE("[{:10.2f}] >>> POWER EVENT \"{}\" (window {})", ElapsedMs(), a_eventName,
-                          g_state.windowOpen ? "open"sv : "shut"sv);
-                }
+                SHOUTMCO_TRACE("[{:10.2f}] >>> POWER EVENT \"{}\" (window {})", ElapsedMs(), a_eventName,
+                      g_state.windowOpen ? "open"sv : "shut"sv);
                 TryFireChainLocked(*settings, emit);
                 consumed = true;
             }
@@ -4561,22 +4559,5 @@ namespace ShoutMCO {
 
         ExecuteEmits(emit, player);
         return consumed;
-    }
-
-    void ShoutChainEngine::OnPowerAttackEventPlayed(std::string_view a_eventName) {
-        std::scoped_lock lock(detail::g_engineLock);
-        if (!g_state.pressPending || g_state.pressKind != AttackKind::kPower) return;
-        if (g_state.shoutActive && !g_state.waitingForShoutStart) return;
-
-        const auto waited = ElapsedMs() - g_state.pressedAtMs;
-        g_state.pressPending = false;
-        g_state.pressResolved = false;
-        g_state.waitingForShoutStart = false;
-        // The queued-shout token would otherwise swallow the next unrelated attack too (see
-        // `WatchdogReleasePressLocked`); the game just proved the shout is not coming.
-        AbandonQueuedResumeLockedImpl("power attack played by the game while the shout was queued"sv);
-        SHOUTMCO_TRACE("[{:10.2f}] >>> POWER EVENT \"{}\" played by the game {:.1f}ms after it was "
-              "buffered -- buffer dropped, queued shout abandoned",
-              ElapsedMs(), a_eventName, waited);
     }
 }
