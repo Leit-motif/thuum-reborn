@@ -216,12 +216,16 @@ namespace ShoutMCO {
             const char* name = a_eventName.c_str();
             if (!name || !IsPowerAttackStartEvent(name)) return forward();
 
-            // NOT FORWARDED when the engine takes it. The press is buffered and the engine's own
-            // replay sends the real event after the lock; today the source's attempt lands in the
-            // exhale state where nothing consumes an attack event, so withholding it changes
-            // nothing observable except that the graph no longer sees a dead event.
-            if (ShoutChainEngine::OnPowerAttackEvent(name)) return false;
-
+            // ALWAYS FORWARDED, whether or not the engine buffers it. The first cut of this seam
+            // returned false when the engine took the press, on the theory that the source's own
+            // attempt lands in the exhale state where nothing consumes it. Owner-driven 2026-09-05:
+            // a shout queued behind a held power attack replayed its press and never started, the
+            // engine's queued-shout state went stale, and the NEXT held power attack was swallowed
+            // here for 26 s until the watchdog handed it back to a sheathed weapon. The old OCPA key
+            // watch could not swallow, which is what made it fail-safe; this keeps that property.
+            // During a live shout the forwarded event is inert exactly as before, and the buffer
+            // stays additive.
+            ShoutChainEngine::OnPowerAttackEvent(name);
             return forward();
         }
 
