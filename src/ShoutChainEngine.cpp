@@ -4562,4 +4562,21 @@ namespace ShoutMCO {
         ExecuteEmits(emit, player);
         return consumed;
     }
+
+    void ShoutChainEngine::OnPowerAttackEventPlayed(std::string_view a_eventName) {
+        std::scoped_lock lock(detail::g_engineLock);
+        if (!g_state.pressPending || g_state.pressKind != AttackKind::kPower) return;
+        if (g_state.shoutActive && !g_state.waitingForShoutStart) return;
+
+        const auto waited = ElapsedMs() - g_state.pressedAtMs;
+        g_state.pressPending = false;
+        g_state.pressResolved = false;
+        g_state.waitingForShoutStart = false;
+        // The queued-shout token would otherwise swallow the next unrelated attack too (see
+        // `WatchdogReleasePressLocked`); the game just proved the shout is not coming.
+        AbandonQueuedResumeLockedImpl("power attack played by the game while the shout was queued"sv);
+        SHOUTMCO_TRACE("[{:10.2f}] >>> POWER EVENT \"{}\" played by the game {:.1f}ms after it was "
+              "buffered -- buffer dropped, queued shout abandoned",
+              ElapsedMs(), a_eventName, waited);
+    }
 }

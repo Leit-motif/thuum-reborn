@@ -225,8 +225,13 @@ namespace ShoutMCO {
             // watch could not swallow, which is what made it fail-safe; this keeps that property.
             // During a live shout the forwarded event is inert exactly as before, and the buffer
             // stays additive.
-            ShoutChainEngine::OnPowerAttackEvent(name);
-            return forward();
+            const bool taken = ShoutChainEngine::OnPowerAttackEvent(name);
+            const bool accepted = forward();
+            // The graph took it, so the game played this press: drop the buffered copy rather
+            // than replay it later (the watchdog did exactly that, five seconds late, when a
+            // cooldown left a queued shout that could never start).
+            if (taken && accepted) ShoutChainEngine::OnPowerAttackEventPlayed(name);
+            return accepted;
         }
 
     }
