@@ -143,6 +143,10 @@ namespace ShoutMCO {
         // the game was loaded. The `Locked` form is for callers already inside the engine lock;
         // the plain form takes it.
         static void AbandonQueuedResume(std::string_view a_reason);
+        // A replayed shout press did not become a shout. Abandons the queued token and hands back
+        // any press parked behind it, the same hand-back the press watchdog makes -- but now,
+        // not four seconds later. No-op when nothing is queued or parked.
+        static void QueuedShoutDidNotStart();
         static void AbandonQueuedResumeLocked(std::string_view a_reason);
 
     private:

@@ -4463,6 +4463,35 @@ namespace ShoutMCO {
         AbandonQueuedResumeLockedImpl(a_reason);
     }
 
+    void ShoutChainEngine::QueuedShoutDidNotStart() {
+        const auto settings = Settings::Snapshot();
+        auto*      player = RE::PlayerCharacter::GetSingleton();
+        if (!player) return;
+
+        Emit emit;
+        {
+            std::scoped_lock lock(detail::g_engineLock);
+            const bool parked = g_state.pressPending && g_state.waitingForShoutStart;
+            if (!g_queuedResume.valid && !parked) return;
+            if (g_state.shoutActive) return;
+
+            AbandonQueuedResumeLockedImpl("replayed shout press did not start a shout"sv);
+            if (parked) {
+                const auto waited = ElapsedMs() - g_state.pressedAtMs;
+                const auto kind = g_state.pressKind;
+                g_state.waitingForShoutStart = false;
+                g_state.pressPending = false;
+                SHOUTMCO_TRACE("[{:10.2f}] >>> ATTACK without a cut, press {:.1f}ms old ({}) -- the replayed "
+                      "shout did not start, press handed back",
+                      ElapsedMs(), waited, Describe(kind));
+                if (g_state.pressResolved) {
+                    AttackWithoutResumeLocked(*settings, kind, emit);
+                }
+            }
+        }
+        ExecuteEmits(emit, player);
+    }
+
     void ShoutChainEngine::AbandonQueuedResumeLocked(std::string_view a_reason) {
         AbandonQueuedResumeLockedImpl(a_reason);
     }
