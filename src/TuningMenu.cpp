@@ -61,10 +61,19 @@ namespace ShoutMCO::TuningMenu {
 
         UiState g_ui;
 
-        const char* const kPowerSourceItems[] = {"hold", "off"};
+        const char* const kPowerSourceItems[] = {"auto", "ocpa", "hold", "off"};
 
         int PowerSourceIndex(Settings::PowerSource a_source) {
-            return a_source == Settings::PowerSource::kOff ? 1 : 0;
+            switch (a_source) {
+                case Settings::PowerSource::kOcpa:
+                    return 1;
+                case Settings::PowerSource::kHold:
+                    return 2;
+                case Settings::PowerSource::kOff:
+                    return 3;
+                default:
+                    return 0;
+            }
         }
 
         const char* PowerSourceWord(Settings::PowerSource a_source) {
@@ -166,17 +175,19 @@ namespace ShoutMCO::TuningMenu {
             }
             if (commit) WriteFloat("Shout", "fWordTwoHoldSec", g_ui.wordTwoHoldSec);
 
-            if (ImGuiMCP::Combo("Held attack is a power attack", &g_ui.powerSource, kPowerSourceItems, 2)) {
+            if (ImGuiMCP::Combo("Power attack source", &g_ui.powerSource, kPowerSourceItems, 4)) {
                 Write("Chain", "sPowerSource", kPowerSourceItems[g_ui.powerSource]);
             }
             if (ImGuiMCP::IsItemHovered()) {
                 ImGuiMCP::SetTooltip(
-                    "Whether a HELD attack button counts as a power press. A power attack mod\'s "
-                    "own key chains either way.\n\n"
-                    "hold = yes, as in vanilla and MCO alone.\n"
-                    "off = a held button is a light attack. Shouts still chain into it.\n\n"
-                    "Set this to off if you use One Click Power Attack or Elden Power Attack, "
-                    "where HOLDING attack is not a power attack.");
+                    "How you make a power attack.\n\n"
+                    "auto = One Click Power Attack's key if it is installed, otherwise a held "
+                    "attack button.\n"
+                    "ocpa = always One Click Power Attack's key.\n"
+                    "hold = always a held attack button.\n"
+                    "off = no power attack chaining. Shouts still chain into normal attacks.\n\n"
+                    "Set this to off if you use Elden Power Attack, or any power attack mod not "
+                    "listed above.");
             }
 
             if (ImGuiMCP::Checkbox("Diagnostic log (takes effect on restart)", &g_ui.trace)) {
@@ -194,7 +205,8 @@ namespace ShoutMCO::TuningMenu {
             const auto settings = Settings::Snapshot();
 
             ImGuiMCP::SeparatorText("Status");
-            ImGuiMCP::Text("Held attack is a power attack: %s", PowerSourceWord(settings->powerSource));
+            ImGuiMCP::Text("Power attack source in use: %s", PowerSourceWord(settings->resolvedPowerSource));
+            ImGuiMCP::Text("Power attack key: %d", settings->powerAttackKeycode);
             ImGuiMCP::Text("Diagnostic log this session: %s", Settings::TraceLive() ? "on" : "off");
             ImGuiMCP::TextWrapped("Fixed limits. Not settings -- listed so you can quote them in a "
                                   "bug report.");

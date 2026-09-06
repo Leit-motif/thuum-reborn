@@ -5,16 +5,44 @@
 # "ticket 45" or "A45.9" points a stranger at nothing. Catching that where the comment is written
 # beats catching it at release assembly.
 #
-# The build job is slow because CommonLibSSE-NG is large. It caches vcpkg's binaries, so the first
-# run pays for the rest.
+# The build job is slow because CommonLibSSE-NG is large, and "large" is the whole story: measured
+# on 2026-09-02, a successful build job runs about 26 minutes, of which roughly 24 are
+# `cmake --build` compiling the CommonLibSSE-NG submodule from source and about 2.5 are vcpkg
+# installing the nine manifest dependencies. Anything that only speeds up vcpkg is worth minutes,
+# not tens of minutes.
+#
+# WHAT IT COSTS, MEASURED 2026-09-01. In the 30 days to that date this workflow billed 1,492 minutes
+# of a 2,000-minute monthly allowance, and 1,358 of them were the build job alone -- Windows runners
+# bill at 2x, so a 14.8-minute build is about 30 billed minutes every time it starts. The allowance
+# ran out, and for two days nothing was verified at all because every job was refused before it
+# started. The two filters below exist so that does not happen again. Neither reduces what is
+# checked when the source changes.
 
 name: CI
 
 on:
   push:
     branches: [main]
+    # A commit that changes only prose cannot change what any of these three jobs report: the lint
+    # reads src/ and include/, and the other two compile them. Checked against the 25 commits before
+    # this one -- 15 touched nothing but docs/ and .md, and each of those paid for a full run.
+    #
+    # The list is deliberately short. tools/, tests/, config/, pack/, cmake/ and .github/ all still
+    # trigger, because each of them does reach a job; the ten commits in that sample that touched
+    # any of them would still have run. Widen this only against the same kind of check.
+    paths-ignore:
+      - "docs/**"
+      - "**/*.md"
+  # A pull request is a deliberate review moment and is left unfiltered on purpose.
   pull_request:
   workflow_dispatch:
+
+# Three commits landed within eleven minutes on 2026-08-31 and started three complete Windows
+# builds, two of them for a tip that no longer existed by the time they finished. Only the current
+# tip has to be green, so a newer push cancels the older run rather than racing it.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   archaeology-lint:
@@ -48,20 +76,25 @@ jobs:
     # and the rolling label has moved past it -- a `windows-latest` run fails configure with
     # "could not find any instance of Visual Studio". Move this label and the preset together.
     runs-on: windows-2022
-    env:
-      VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
 
-      # vcpkg's GitHub Actions binary cache needs these two handed to it explicitly.
-      - name: Export the Actions cache endpoints for vcpkg
-        uses: actions/github-script@v7
+      # This job used to set VCPKG_BINARY_SOURCES to "clear;x-gha,readwrite", which cached nothing
+      # at all and said so on every run: "the 'x-gha' binary caching backend has been removed".
+      # `clear` switched OFF vcpkg's own default archive cache, and the backend named in its place
+      # no longer exists, so all nine dependencies were rebuilt from source every time. Restoring
+      # vcpkg's default files cache through actions/cache is the supported replacement.
+      #
+      # The key is the manifest, which carries the builtin-baseline, so a dependency or baseline
+      # change invalidates it and nothing else does.
+      - name: Cache the vcpkg binary archives
+        uses: actions/cache@v4
         with:
-          script: |
-            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
-            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+          path: ~\AppData\Local\vcpkg\archives
+          key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json') }}
+          restore-keys: vcpkg-${{ runner.os }}-
 
       - name: Configure
         # The runner ships vcpkg already, at VCPKG_INSTALLATION_ROOT, and the preset reads

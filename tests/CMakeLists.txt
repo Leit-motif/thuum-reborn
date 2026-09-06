@@ -14,9 +14,6 @@ project(ShoutMCOTests VERSION 1.0.0 LANGUAGES CXX)
 
 enable_testing()
 
-# One test starts a thread to prove the seam's guard is per-thread; harmless for the rest.
-find_package(Threads REQUIRED)
-
 function(shoutmco_host_test name source)
 	add_executable(${name} ${source})
 	target_compile_features(${name} PRIVATE cxx_std_23)
@@ -33,7 +30,6 @@ function(shoutmco_host_test name source)
 	target_compile_definitions(${name} PRIVATE
 		SHOUTMCO_REPO_ROOT="${CMAKE_CURRENT_SOURCE_DIR}/.."
 	)
-	target_link_libraries(${name} PRIVATE Threads::Threads)
 	add_test(NAME ${name} COMMAND ${name})
 endfunction()
 
@@ -51,5 +47,3 @@ shoutmco_host_test(shout_hold_thresholds_tests shout_hold_thresholds_tests.cpp)
 shoutmco_host_test(settings_ini_parity_tests settings_ini_parity_tests.cpp)
 # The tuning menu's INI writer: one value changed, every comment left alone. No game types.
 shoutmco_host_test(ini_rewrite_tests ini_rewrite_tests.cpp)
-# The power-attack seam: the outgoing-event match rule and its re-entrancy guard. No game types.
-shoutmco_host_test(attack_seam_tests attack_seam_tests.cpp)

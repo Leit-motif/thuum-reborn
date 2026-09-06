@@ -40,9 +40,8 @@ cannot do on its own — so Nemesis is a requirement and a run is needed after i
 ## Requirements
 
 SKSE64, Address Library, Nemesis, Payload Interpreter, Open Animation Replacer, ADXP | MCO,
-State Behavior Framework, and SYHO - Shout Your Heart Out. Any power attack mod is optional and
-needs no configuration: the power press is recognised on the animation graph, downstream of
-whichever key started it.
+State Behavior Framework, and SYHO - Shout Your Heart Out. One Click Power Attack NG is optional
+and auto-detected.
 
 **SKSE Menu Framework is optional.** With it installed the mod registers an in-game page under
 *Thu'um Reborn* for tuning the feel values live; without it the plugin logs one line and the INI

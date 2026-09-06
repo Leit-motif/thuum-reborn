@@ -14,9 +14,9 @@ namespace ShoutMCO {
     //
     // TWO CLASSES OF FIELD LIVE HERE, and the split is deliberate.
     //
-    // Read from `Data/SKSE/Plugins/ShoutMCO.ini` -- SIX, and only these six:
-    //     bTrace, bShoutWaitsForSwing, iChainWindowPct, sPowerSource, fWordTwoHoldSec,
-    //     fWordThreeHoldSec.
+    // Read from `Data/SKSE/Plugins/ShoutMCO.ini` -- SEVEN, and only these seven:
+    //     bTrace, bShoutWaitsForSwing, iChainWindowPct, sPowerSource, iPowerAttackKeycode,
+    //     fWordTwoHoldSec, fWordThreeHoldSec.
     //
     // The last two are the GMST hold-threshold overrides, and they are the first settings here
     // that configure the GAME rather than this engine -- see their fields and
@@ -142,21 +142,17 @@ namespace ShoutMCO {
         // Only `attackStart` was ever exercised in game. A wrong name here produces no attack
         // rather than a wrong one -- which is precisely why this stopped being a
         // setting: a silent no-op is the worst possible thing to hand a player a text box for.
-        // WHETHER power presses chain at all -- no longer WHERE they come from. The source is a
-        // settled question now: a power press is seen downstream of the key, as an outgoing
-        // `attackPowerStart*` graph event (`AttackSeam.h`), which every power-attack source
-        // produces. `kAuto` and `kOcpa` are gone with the config reading they existed to drive.
+        // Where a power press comes from. Load orders differ on this and neither answer can be
+        // assumed, so `kAuto` decides by looking: if One Click Power Attack's config is present
+        // its key is used, otherwise the press is a held attack button, which is what a load
+        // order without OCPA gives the player.
         //
-        // `kOff` survives because it has a documented use the seam does not answer: the held
-        // attack button is still a power press on the vanilla path (`OnAttackHold`, inside
-        // `AttackBlockHandler::UpdateHeldStateActive`, which this plugin swallows during a shout
-        // so neither the graph nor a power-attack mod ever sees it), and under One Click Power
-        // Attack or Elden Power Attack a HELD button is not a power attack outside a shout. `off`
-        // is how that player says "a held button is a light attack here too"; their mod's own
-        // key still chains through the seam.
-        enum class PowerSource { kHold, kOff };
+        // Both paths are verified in game: the key, and the hold.
+        enum class PowerSource { kAuto, kOcpa, kHold, kOff };
 
-        PowerSource powerSource = PowerSource::kHold;
+        PowerSource powerSource = PowerSource::kAuto;
+        // What kAuto resolved to. Never read from the INI.
+        PowerSource resolvedPowerSource = PowerSource::kOff;
 
         // The power attack event. Always the in-place one: MCO consumes it, and the directional
         // variants are a dead end here -- `attackPowerStartForward` is accepted by the graph but
@@ -186,12 +182,13 @@ namespace ShoutMCO {
         // override for odd setups, not a value anyone should have to find and tune.
         float powerHoldSeconds = -1.0f;
 
-        // The held attack button, the vanilla no-mod path. Its own seam is
-        // `AttackBlockHandler::UpdateHeldStateActive`, not the graph, and this is the ONLY thing
-        // `sPowerSource` governs. The graph seam (`AttackSeam.h`) is always on: an outgoing
-        // `attackPowerStart*` is a decision some mod already made, and parity with that key is
-        // the whole point of the seam, so there is nothing to switch off.
-        [[nodiscard]] bool HoldToPower() const { return powerSource == PowerSource::kHold; }
+        // OCPA's key. -1 means "read OCPA's own config", so the key lives in exactly one place
+        // and follows the player's own binding; 0 means no key. Mouse buttons are 256 + button
+        // index, as SKSE and OCPA both number them.
+        int powerAttackKeycode = -1;
+
+        [[nodiscard]] bool HoldToPower() const { return resolvedPowerSource == PowerSource::kHold; }
+        [[nodiscard]] bool KeyToPower() const { return resolvedPowerSource == PowerSource::kOcpa; }
 
         // THE OTHER DIRECTION: a shout pressed partway through an MCO attack.
         //

@@ -38,16 +38,11 @@ namespace ShoutMCO {
         static bool OnAttackButton(const RE::ButtonEvent& a_event, float a_gameHoldThreshold);
         static bool OnAttackHold(const RE::ButtonEvent& a_event, float a_gameHoldThreshold);
 
-        // A power press, seen DOWNSTREAM OF THE KEY as an outgoing `attackPowerStart*` graph
-        // event (`AttackSeam.h`). Every power-attack source -- vanilla's hold, One Click Power
-        // Attack's key, MCO's directional variants -- reaches this same seam, so nothing here
-        // reads another mod's config or knows a key code.
-        //
-        // Returns true if the press was buffered for a queued shout or started a chain, in which
-        // case the caller does NOT forward the event: the engine's own replay sends the real one
-        // after the lock, and the source's attempt would otherwise land in the exhale state where
-        // nothing consumes an attack event anyway.
-        static bool OnPowerAttackEvent(std::string_view a_eventName);
+        // One Click Power Attack's key, seen on the raw input stream. Observed, never swallowed:
+        // OCPA acts on the key itself, but its attempt lands in the exhale state where nothing
+        // consumes an attack event, so it is a no-op and our chain is the only
+        // effect. Returns true if the press was buffered for a queued shout or started a chain.
+        static bool OnPowerAttackKey(std::uint32_t a_keycode);
 
         // Milliseconds since the first observed graph event. Shared so every line in the trace is
         // on one clock, whichever hook wrote it.
@@ -143,10 +138,6 @@ namespace ShoutMCO {
         // the game was loaded. The `Locked` form is for callers already inside the engine lock;
         // the plain form takes it.
         static void AbandonQueuedResume(std::string_view a_reason);
-        // A replayed shout press did not become a shout. Abandons the queued token and hands back
-        // any press parked behind it, the same hand-back the press watchdog makes -- but now,
-        // not four seconds later. No-op when nothing is queued or parked.
-        static void QueuedShoutDidNotStart();
         static void AbandonQueuedResumeLocked(std::string_view a_reason);
 
     private:

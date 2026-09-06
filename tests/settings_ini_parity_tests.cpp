@@ -201,7 +201,7 @@ namespace {
         return true;
     }
 
-    // `PowerSource::kHold` is what the field says; `hold` is what the file says. The INI's own
+    // `PowerSource::kAuto` is what the field says; `auto` is what the file says. The INI's own
     // vocabulary is the enumerator minus its `k`, lowercased.
     std::string EnumeratorWord(const std::string& a_initialiser) {
         const std::size_t scope = a_initialiser.rfind("::");
@@ -270,15 +270,16 @@ int main() {
     // for features whose acceptance is still open, and they are named here so that adding to this
     // list is a decision somebody makes rather than one that happens.
     //
-    // THREE MORE JOINED THEM WHEN THE MENU WAS PRUNED. Owner ruling: a setting the author has to
+    // FOUR MORE JOINED THEM WHEN THE MENU WAS PRUNED. Owner ruling: a setting the author has to
     // reload the concept of is not a setting. `iChainWindowPct` trades responsiveness against how
     // much of the shout animation you see, which is one number pulling against both things the mod
     // is for; `bShoutWaitsForSwing` off is not a preference but a different mod; the word-three
-    // hold only means anything after moving word two a long way. All three still parse, so development and a
+    // hold only means anything after moving word two a long way; and the power keycode is the
+    // escape hatch for `sPowerSource`, not a choice. All four still parse, so development and a
     // support case can still reach them. None is offered to a player.
-    const std::set<std::string> unshippedOnPurpose{"bChainDriverCasts", "iPowerAdvanceWaitMs",
-                                                   "iChainWindowPct", "bShoutWaitsForSwing",
-                                                   "fWordThreeHoldSec"};
+    const std::set<std::string> unshippedOnPurpose{
+        "bChainDriverCasts",   "iPowerAdvanceWaitMs", "iChainWindowPct",
+        "bShoutWaitsForSwing", "fWordThreeHoldSec",   "iPowerAttackKeycode"};
 
     std::printf("every shipped key parses, and its default matches what the file says\n");
     for (const auto& [key, value] : ini) {
