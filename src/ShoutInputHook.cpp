@@ -179,6 +179,29 @@ namespace ShoutMCO {
         // and ~250ms at 240, i.e. a different shout on different hardware. Landing on a later frame
         // is the OBSERVABLE CONSEQUENCE of waiting real time, not the thing being asked for -- which
         // is why the frame numbers are in the trace and not in the condition.
+        // THE REPLAY EITHER BECOMES A SHOUT OR THE QUEUE IS OVER. The cooldown gate above covers
+        // the one refusal that can be read ahead of time; a stagger, a menu, a killmove, or an
+        // unequipped shout refuse the replayed press just the same, and the engine cannot see a
+        // refusal -- only a shout that begins. So after the replay has had long enough to become
+        // one (the tap plus the game's own press-to-`BeginCastVoice` latency, generously), a shout
+        // that is not live means the queued token and any press parked behind it are handed back
+        // now rather than by the four-second watchdog. Duration, not frames, for the same reason
+        // as the tap itself.
+        constexpr double kReplayOutcomeMs = 450.0;
+
+        void ArmReplayOutcomeCheck() {
+            const auto delay = std::chrono::milliseconds(static_cast<long long>(kReplayOutcomeMs));
+            std::thread([delay]() {
+                std::this_thread::sleep_for(delay);
+                auto* task = SKSE::GetTaskInterface();
+                if (!task) return;
+                task->AddTask([]() {
+                    if (ShoutChainEngine::IsShoutLive()) return;
+                    ShoutChainEngine::QueuedShoutDidNotStart();
+                });
+            }).detach();
+        }
+
         void PostReplayUp(const Replay& a_replay) {
             const auto delay = std::chrono::milliseconds(static_cast<long long>(kReplayTapMs));
 
@@ -222,8 +245,23 @@ namespace ShoutMCO {
         // it reads and writes the held press and, on a hold-start, takes the combo snapshot in
         // the same locked breath (press-taking and queue-noting are one decision).
         bool ShouldSwallowLocked(const RE::ButtonEvent& a_event, const Settings& a_settings,
-                                 const ShoutChainEngine::ComboSnapshot& a_combo, bool a_haveCombo) {
+                                 const ShoutChainEngine::ComboSnapshot& a_combo, bool a_haveCombo,
+                                 float a_voiceRecoverySec) {
             if (!a_settings.enabled || !a_settings.shoutWaitsForSwing) return false;
+
+            // A SHOUT THE GAME WILL REFUSE IS NEVER QUEUED. Holding a press back and replaying it
+            // after the swing only pays off if the replay becomes a shout; on cooldown it cannot,
+            // and the queued-shout token then outlives its press -- every attack button after it
+            // was swallowed as "waiting for queued shout" and the power key was buffered against a
+            // shout that never came. The recovery time is sampled by the caller, outside the lock
+            // (EngineLock.h rule 2), and a fresh down edge with time left is the game's to decline
+            // exactly as a press with nothing to wait behind is.
+            if (a_event.IsDown() && !g_held.holding && a_voiceRecoverySec > 0.0f) {
+                SHOUTMCO_TRACE("[{:10.2f}] >>> SHOUT press forwarded -- voice on cooldown ({:.1f}s left), "
+                               "nothing is queued for a shout the game will refuse",
+                               ShoutChainEngine::ElapsedMs(), a_voiceRecoverySec);
+                return false;
+            }
 
             if (g_held.holding) {
                 // Already holding one back. Keep eating everything until it is released, or the
@@ -357,6 +395,12 @@ namespace ShoutMCO {
                     }
                 }
 
+                // Game read, taken before the lock (EngineLock.h rule 2).
+                float voiceRecoverySec = 0.0f;
+                if (auto* pc = RE::PlayerCharacter::GetSingleton()) {
+                    voiceRecoverySec = pc->GetVoiceRecoveryTime();
+                }
+
                 bool swallowed = false;
                 {
                     std::scoped_lock lock(detail::g_engineLock);
@@ -369,7 +413,7 @@ namespace ShoutMCO {
                     g_held.idCode = a_event->GetIDCode();
                     g_held.userEvent = a_event->QUserEvent();
 
-                    swallowed = ShouldSwallowLocked(*a_event, *settings, combo, haveCombo);
+                    swallowed = ShouldSwallowLocked(*a_event, *settings, combo, haveCombo, voiceRecoverySec);
 
                     // AFTER the swallow decision, and that ordering is the whole point.
                     //
@@ -585,6 +629,7 @@ namespace ShoutMCO {
             if (!stillDown) {
                 PostReplayUp(replay);
             }
+            ArmReplayOutcomeCheck();
         });
     }
 
