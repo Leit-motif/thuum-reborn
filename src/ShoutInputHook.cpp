@@ -10,6 +10,7 @@
 #include "CastIntentApi.h"
 #include "EngineLock.h"
 #include "Settings.h"
+#include "RuntimeHooks.h"
 #include "ShoutChainEngine.h"
 #include "Trace.h"
 
@@ -246,7 +247,7 @@ namespace ShoutMCO {
         // the same locked breath (press-taking and queue-noting are one decision).
         bool ShouldSwallowLocked(const RE::ButtonEvent& a_event, const Settings& a_settings,
                                  const ShoutChainEngine::ComboSnapshot& a_combo, bool a_haveCombo,
-                                 float a_voiceRecoverySec) {
+                                 float a_voiceRecoverySec, SwingReading a_swing) {
             if (!a_settings.enabled || !a_settings.shoutWaitsForSwing) return false;
 
             // A SHOUT THE GAME WILL REFUSE IS NEVER QUEUED. Holding a press back and replaying it
@@ -296,7 +297,7 @@ namespace ShoutMCO {
             // pulled back.
             if (!a_event.IsDown()) return false;
 
-            const auto verdict = ShoutChainEngine::ShouldHoldShoutLocked();
+            const auto verdict = ShoutChainEngine::ShouldHoldShoutLocked(a_swing);
             if (!verdict.hold) {
                 // Nothing to queue behind -- no live MCO attack and no open shout chain window --
                 // so the press is not ours to take.
@@ -311,7 +312,15 @@ namespace ShoutMCO {
                 //
                 // What this line means for a reader: from here the press belongs to the GAME. Any
                 // reason it does not become a shout -- staggered, mid-killmove, on cooldown, out of
-                // voice -- is vanilla's decision, and this engine never makes it (ADR-0002).
+                // voice -- is vanilla's decision today, and this engine makes none of them.
+                //
+                // THAT IS A DESCRIPTION, NOT A RULE, and this comment used to end "(ADR-0002)" as
+                // though it were one. ADR-0002 governs COOLDOWN STATE ONLY -- its own scope note
+                // says so, and explicitly permits reading animation and actor state. `staggered`
+                // and `mid-killmove` were never its business. The miscitation propagated
+                // into a later bug report, which opened claiming the owner's stagger-block ruling
+                // "will have to argue with ADR-0002". It does not. If this engine ever refuses a
+                // press during a stagger, nothing here or in that ADR stands in the way.
                 SHOUTMCO_TRACE("[{:10.2f}] >>> SHOUT press forwarded -- nothing to wait behind "
                                "(attack live={}); from here the shout is the game's to allow",
                                ShoutChainEngine::ElapsedMs(), verdict.attackLive);
@@ -386,12 +395,16 @@ namespace ShoutMCO {
                 // Sampled on the down edge only -- that is the only edge that can start a hold --
                 // and only when the engine could actually queue it, so a disabled engine pays
                 // nothing per press.
+                // The swing reading rides the same edge and the same gate: it is what lets a swing
+                // no MCO initiate announced -- every BFCO swing -- still hold the press.
                 ShoutChainEngine::ComboSnapshot combo{};
                 bool                            haveCombo = false;
+                SwingReading                    swing{};
                 if (a_event->IsDown() && settings->enabled && settings->shoutWaitsForSwing) {
                     if (auto* player = RE::PlayerCharacter::GetSingleton()) {
                         combo = ShoutChainEngine::SampleCombo(player);
                         haveCombo = true;
+                        swing = ShoutChainEngine::ReadSwing(player);
                     }
                 }
 
@@ -413,7 +426,7 @@ namespace ShoutMCO {
                     g_held.idCode = a_event->GetIDCode();
                     g_held.userEvent = a_event->QUserEvent();
 
-                    swallowed = ShouldSwallowLocked(*a_event, *settings, combo, haveCombo, voiceRecoverySec);
+                    swallowed = ShouldSwallowLocked(*a_event, *settings, combo, haveCombo, voiceRecoverySec, swing);
 
                     // AFTER the swallow decision, and that ordering is the whole point.
                     //
@@ -457,7 +470,8 @@ namespace ShoutMCO {
     void ShoutInputHook::Install() {
         REL::Relocation<std::uintptr_t> vtbl{RE::VTABLE_ShoutHandler[0]};
         g_originalProcessButton =
-            reinterpret_cast<ProcessButton_t>(vtbl.write_vfunc(0x4, &Hook_ProcessButton));
+            reinterpret_cast<ProcessButton_t>(WriteVerifiedVFunc(
+                vtbl, InputHandlerSlot(0x4), &Hook_ProcessButton, "ShoutHandler::ProcessButton"));
         log::info("[ShoutMCO] shout-input hook installed");
     }
 

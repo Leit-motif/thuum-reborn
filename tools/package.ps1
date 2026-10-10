@@ -60,7 +60,7 @@ function Assert-SkyrimClosed {
 if ($Deploy) { Assert-SkyrimClosed }
 # The PRODUCT name, owner ruling 2026-08-28. Internal `ShoutMCO` names -- DLL, INI, log filename,
 # every archived trace path -- are deliberately unchanged; only what the player sees carries this.
-# THE PUBLIC NAME, and it is settled: `Thu'um Reborn` (owner, 2026-08-29). This read
+# THE PUBLIC NAME, and it is settled: `Thu'um Reborn`. This read
 # "Thu'um - Fully Animated Shouts Reborn" -- the candidate that was explicitly NOT taken --
 # and so both the 1.0.3 and 1.0.4 archives shipped under a rejected name. README.md's Naming
 # table is canonical; check it before changing this line, and never let a second alias loose:
@@ -273,6 +273,41 @@ if ($fileVersion -ne $expectedVersion) {
     throw "DLL reports '$fileVersion' but CMakeLists says '$Version' (expected '$expectedVersion'). Rebuild before packaging."
 }
 
+# THE DLL MUST NAME THE COMMIT THIS RUN IS ABOUT TO STAMP ON IT. The version check above ties the
+# binary to CMakeLists' VERSION, which moves once a release; it cannot tell one build of 1.0.1 from
+# another, and it cannot tell this repository's build from anybody else's. That gap shipped: the
+# deployed mod folder carried the published 1.0 binary, built from the PUBLIC repo, under a meta.ini
+# naming a commit of THIS repo whose source could not have produced it. Every log read off that
+# install was then ambiguous about which binary wrote it.
+#
+# cmake/GitStamp.cmake writes the building tree's commit into the DLL's Comments field before every
+# build. Read it back here and compare. A foreign or stale binary is now a thrown error instead of
+# a claim in meta.ini that nobody rechecks.
+$stamped = (Get-Item $dll).VersionInfo.Comments
+Write-Host "  DLL commit stamp:     $stamped"
+if ($stamped -notmatch '^commit ([0-9a-f]{7,40})(\+dirty)?$') {
+    throw @"
+The staged DLL carries no readable commit stamp (Comments = '$stamped').
+Either it was not built from this repository, or it predates cmake/GitStamp.cmake.
+Rebuild with: cmake --build --preset ALL-Release
+"@
+}
+$stampedCommit = $Matches[1]
+$stampedDirty  = [bool]$Matches[2]
+# $Commit already carries its own '+dirty' when the tree is dirty; compare the hashes only, then
+# treat dirtiness on either side as needing the same deliberate -AllowDirty the tree check wants.
+$packagingCommit = ($Commit -split '\+')[0]
+if ($stampedCommit -ne $packagingCommit) {
+    throw @"
+The staged DLL was built from commit $stampedCommit, but this run would stamp $packagingCommit.
+Packaging it would put a provenance on the artifact that its binary contradicts -- the exact
+failure this check exists to stop. Rebuild from the current tree, or check out $stampedCommit.
+"@
+}
+if ($stampedDirty -and -not $AllowDirty) {
+    throw "The staged DLL was built from a dirty tree ($stamped). Rebuild from a clean tree, or re-run with -AllowDirty."
+}
+
 # Stamp the provenance into the shipped README, as the last lines of the file. The staged copy is
 # stamped, never the source in docs/release/ -- the stamp describes THIS packaging run.
 $stagedReadme = Join-Path $StageDir 'README.txt'
@@ -355,6 +390,19 @@ Assert-SkyrimClosed
 if (Test-Path $Target) { Remove-Item $Target -Recurse -Force }
 New-Item -ItemType Directory -Path $Target -Force | Out-Null
 Copy-Item (Join-Path $StageDir '*') $Target -Recurse -Force
+
+# The installed copy is the dev game's, so it traces; the archive keeps the shipped `bTrace = 0`
+# -- tracing is for the dev install, never for players. Done here,
+# not remembered: this replace used to reset the dev ini to 0, and that cost a full
+# playtest session. Text is read and written whole, so the file's encoding and line endings
+# survive.
+$devIni = Join-Path $Target 'SKSE\Plugins\ShoutMCO.ini'
+$iniText = [System.IO.File]::ReadAllText($devIni)
+$traced = [regex]::Replace($iniText, '(?m)^(\s*bTrace\s*=\s*)0', '${1}1')
+[System.IO.File]::WriteAllText($devIni, $traced)
+if (-not (Select-String -Path $devIni -Pattern '^\s*bTrace\s*=\s*1\b' -Quiet)) {
+    throw "Deployed ShoutMCO.ini does not read bTrace = 1 -- the dev install would run untraced."
+}
 
 # MO2 lists a folder without meta.ini, but shows it as having no origin and no version. Writing one
 # is what makes the deployed copy identifiable as this release rather than a stray folder.

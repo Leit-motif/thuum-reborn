@@ -62,10 +62,15 @@ namespace ShoutMCO {
             // ONE LOCKED BREATH for the verdict, the take, and the displaced press's abandonment,
             // so a press arriving between the verdict and the take would make
             // the decision describe a slot that is no longer the one being filled.
+            //
+            // The swing reading is a game read, so it is taken here, before the lock (EngineLock.h
+            // rule 2). A hotbar shout fired mid-swing under BFCO waits behind it the same way the
+            // shout key's press does.
+            const auto swing = ShoutChainEngine::ReadSwing(RE::PlayerCharacter::GetSingleton());
             CastIntentSlot::TakeResult taken{};
             {
                 std::scoped_lock lock(detail::g_engineLock);
-                const auto verdict = ShoutChainEngine::ShouldHoldShoutLocked();
+                const auto verdict = ShoutChainEngine::ShouldHoldShoutLocked(swing);
                 if (!verdict.hold) return SHOUTMCO_CAST_PASS_THROUGH;
 
                 taken = g_slot.TakeDriver(a_request->callback, a_request->context,

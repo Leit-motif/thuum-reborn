@@ -14,9 +14,9 @@ namespace ShoutMCO {
     //
     // TWO CLASSES OF FIELD LIVE HERE, and the split is deliberate.
     //
-    // Read from `Data/SKSE/Plugins/ShoutMCO.ini` -- SIX, and only these six:
-    //     bTrace, bShoutWaitsForSwing, iChainWindowPct, sPowerSource, fWordTwoHoldSec,
-    //     fWordThreeHoldSec.
+    // Read from `Data/SKSE/Plugins/ShoutMCO.ini` -- FIVE, and only these five:
+    //     bTrace, bShoutWaitsForSwing, iChainWindowPct, fWordTwoHoldSec, fWordThreeHoldSec.
+    // `sPowerSource` was the sixth and is now parsed only to be ignored.
     //
     // The last two are the GMST hold-threshold overrides, and they are the first settings here
     // that configure the GAME rather than this engine -- see their fields and
@@ -142,21 +142,12 @@ namespace ShoutMCO {
         // Only `attackStart` was ever exercised in game. A wrong name here produces no attack
         // rather than a wrong one -- which is precisely why this stopped being a
         // setting: a silent no-op is the worst possible thing to hand a player a text box for.
-        // WHETHER power presses chain at all -- no longer WHERE they come from. The source is a
-        // settled question now: a power press is seen downstream of the key, as an outgoing
-        // `attackPowerStart*` graph event (`AttackSeam.h`), which every power-attack source
-        // produces. `kAuto` and `kOcpa` are gone with the config reading they existed to drive.
-        //
-        // `kOff` survives because it has a documented use the seam does not answer: the held
-        // attack button is still a power press on the vanilla path (`OnAttackHold`, inside
-        // `AttackBlockHandler::UpdateHeldStateActive`, which this plugin swallows during a shout
-        // so neither the graph nor a power-attack mod ever sees it), and under One Click Power
-        // Attack or Elden Power Attack a HELD button is not a power attack outside a shout. `off`
-        // is how that player says "a held button is a light attack here too"; their mod's own
-        // key still chains through the seam.
-        enum class PowerSource { kHold, kOff };
+        // The power SOURCE is a settled question: a power press is seen downstream of the key,
+        // as an outgoing `attackPowerStart*` graph event (`AttackSeam.h`), which every
+        // power-attack source produces. `PowerSource` and its `kAuto`/`kOcpa`/`kOff` values
+        // are all gone -- see the note further down for why `kOff` outlived the others and
+        // then went too.
 
-        PowerSource powerSource = PowerSource::kHold;
 
         // The power attack event. Always the in-place one: MCO consumes it, and the directional
         // variants are a dead end here -- `attackPowerStartForward` is accepted by the graph but
@@ -179,19 +170,17 @@ namespace ShoutMCO {
         // investigated happens over the swing, so a profile is needed rather than one sample.
         int motionWatchMs = 3000;
 
-        // How long the attack button must be held to count as a power press, in hold mode.
-        // Negative means "use the game's own threshold" -- `AttackBlockHandler` carries
-        // `initialPowerAttackDelay`, which already reflects the player's `fInitialPowerAttackDelay`.
-        // Inventing a constant here would silently disagree with their game, so this is an
-        // override for odd setups, not a value anyone should have to find and tune.
-        float powerHoldSeconds = -1.0f;
-
-        // The held attack button, the vanilla no-mod path. Its own seam is
-        // `AttackBlockHandler::UpdateHeldStateActive`, not the graph, and this is the ONLY thing
-        // `sPowerSource` governs. The graph seam (`AttackSeam.h`) is always on: an outgoing
-        // `attackPowerStart*` is a decision some mod already made, and parity with that key is
-        // the whole point of the seam, so there is nothing to switch off.
-        [[nodiscard]] bool HoldToPower() const { return powerSource == PowerSource::kHold; }
+        // THE HELD ATTACK BUTTON IS NOT A POWER PRESS HERE, and there is no setting for it.
+        // `powerHoldSeconds`, `PowerSource` and `HoldToPower()` all lived on this line and
+        // went together with the path they served. Vanilla's long-press is the one
+        // power route that never reaches the graph seam during a shout -- the engine owns the
+        // button, so the game never emits `attackPowerStart*` and the engine had to time the hold
+        // itself. The owner ruled that route unsupported, which left an absolute
+        // threshold and a whole INI key with nothing to decide.
+        //
+        // Every power press now arrives at `AttackSeam.h` already decided by whichever attack mod
+        // made it -- BFCO, OCPA, Elden Power Attack. Do not reintroduce a hold timer to "also
+        // support vanilla"; that is the rejected scope, not a gap.
 
         // THE OTHER DIRECTION: a shout pressed partway through an MCO attack.
         //

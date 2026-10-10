@@ -8,7 +8,7 @@ project(
 	ShoutMCO
 	# Bumped the moment shipped src/ moves past the last release rather than at the next one. A
 	# window where two different binaries both called themselves 1.0.0 is what that rule cost.
-	VERSION 1.0.4
+	VERSION 1.0.2
 	# The PUBLIC name, settled 2026-08-29. The version resource stamps FileDescription from
 	# PROJECT_NAME instead, so this string never reaches the binary -- but it is what a reader
 	# of this file takes the mod to be called.
@@ -28,7 +28,7 @@ if(NOT BUILD_SKYRIM)
 	message(FATAL_ERROR "Configure with the ALL preset so BUILD_SKYRIM=ON.")
 endif()
 
-# Spec targets SE 1.5.97 and AE 1.6.1170. VR is out of scope.
+# SE 1.5.97 and AE 1.6.1170 / Steam 1.7.104. VR is out of scope.
 if(NOT ENABLE_SKYRIM_SE OR NOT ENABLE_SKYRIM_AE OR ENABLE_SKYRIM_VR)
 	message(FATAL_ERROR "Use preset ALL (SE=ON, AE=ON, VR=OFF).")
 endif()
@@ -58,12 +58,28 @@ source_group(TREE "${SHOUTMCO_SRC_DIR}" PREFIX "Source Files" FILES ${SHOUTMCO_S
 
 target_sources("${PROJECT_NAME}" PRIVATE ${SHOUTMCO_HEADERS} ${SHOUTMCO_SOURCES})
 
-configure_file(
-	"${CMAKE_CURRENT_SOURCE_DIR}/cmake/version.rc.in"
-	"${CMAKE_CURRENT_BINARY_DIR}/cmake/version.rc"
-	@ONLY
+# THE VERSION RESOURCE CARRIES THE BUILD'S OWN COMMIT, and it is regenerated before every build
+# rather than at configure time. A configure-time stamp goes stale the moment anyone commits, which
+# would make it worse than no stamp -- a confident wrong answer. cmake/GitStamp.cmake explains what
+# the stamp is for; tools/package.ps1 reads it back and refuses to ship a mismatch.
+set(SHOUTMCO_VERSION_RC_IN "${CMAKE_CURRENT_SOURCE_DIR}/cmake/version.rc.in")
+set(SHOUTMCO_VERSION_RC "${CMAKE_CURRENT_BINARY_DIR}/cmake/version.rc")
+set(SHOUTMCO_REPO_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/GitStamp.cmake")
+target_sources("${PROJECT_NAME}" PRIVATE "${SHOUTMCO_VERSION_RC}")
+add_custom_command(TARGET ${PROJECT_NAME} PRE_BUILD
+	COMMAND ${CMAKE_COMMAND}
+		-DSHOUTMCO_REPO_DIR=${CMAKE_CURRENT_SOURCE_DIR}
+		-DSHOUTMCO_VERSION_RC_IN=${SHOUTMCO_VERSION_RC_IN}
+		-DSHOUTMCO_VERSION_RC=${SHOUTMCO_VERSION_RC}
+		-DPROJECT_NAME=${PROJECT_NAME}
+		-DPROJECT_VERSION=${PROJECT_VERSION}
+		-DPROJECT_VERSION_MAJOR=${PROJECT_VERSION_MAJOR}
+		-DPROJECT_VERSION_MINOR=${PROJECT_VERSION_MINOR}
+		-DPROJECT_VERSION_PATCH=${PROJECT_VERSION_PATCH}
+		-P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/GitStamp.cmake"
+	COMMENT "Stamping the git commit into the version resource"
 )
-target_sources("${PROJECT_NAME}" PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/cmake/version.rc")
 
 target_precompile_headers(
 	"${PROJECT_NAME}"
@@ -133,6 +149,17 @@ target_include_directories(
 )
 
 target_link_libraries(${PROJECT_NAME} PRIVATE spdlog::spdlog)
+
+# Opt-in probe of the actual dependency's runtime/layout dispatch and database reader.
+# Host state-machine tests remain the standalone tests/ project.
+option(SHOUTMCO_BUILD_RUNTIME_PROBE "Build the CommonLib runtime compatibility probe" OFF)
+if(SHOUTMCO_BUILD_RUNTIME_PROBE)
+	add_executable(runtime_layout_tests tests/runtime_layout_tests.cpp)
+	target_compile_features(runtime_layout_tests PRIVATE cxx_std_23)
+	target_compile_definitions(runtime_layout_tests PRIVATE ENABLE_COMMONLIBSSE_TESTING)
+	target_include_directories(runtime_layout_tests PRIVATE "${SHOUTMCO_SRC_DIR}")
+	target_link_libraries(runtime_layout_tests PRIVATE CommonLibSSE::CommonLibSSE)
+endif()
 
 # Stage to dist/ only. Deployment into the MO2 mods folder is a deliberate, separate
 # step -- see AGENTS.md: never write into STOCK GAME\Data, and preview any deployment.

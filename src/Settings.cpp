@@ -56,22 +56,6 @@ namespace ShoutMCO {
         // overloads below stay: `Log()` still reports these values, which is the point of demoting
         // them rather than deleting them.
 
-        Settings::PowerSource ParsePowerSource(const std::string& a_value, Settings::PowerSource a_fallback) {
-            if (a_value == "hold") return Settings::PowerSource::kHold;
-            if (a_value == "off") return Settings::PowerSource::kOff;
-            log::warn("[ShoutMCO] unknown sPowerSource '{}'; keeping the previous value", a_value);
-            return a_fallback;
-        }
-
-        std::string_view Describe(Settings::PowerSource a_source) {
-            switch (a_source) {
-                case Settings::PowerSource::kHold:
-                    return "hold"sv;
-                default:
-                    return "off"sv;
-            }
-        }
-
         std::string_view Describe(Settings::WindowSource a_source) {
             return a_source == Settings::WindowSource::kGraph ? "graph"sv : "spellfire"sv;
         }
@@ -246,7 +230,14 @@ namespace ShoutMCO {
                 // Two lines, and they buy a clean upgrade. Delete them a release after 1.0.2, once
                 // an INI carrying this key is old enough to be worth telling its owner about.
             } else if (key == "sPowerSource") {
-                s.powerSource = ParsePowerSource(value, s.powerSource);
+                // SILENTLY IGNORED, exactly as `sShoutGate` above and for the same reason. Every
+                // 1.0 user has this key, and it governed one thing: whether a HELD attack button
+                // counted as a power press. The mod no longer supports vanilla's long-press (an owner
+                // ruling), so there is nothing left for the key to select and no
+                // migration to perform -- a power press now enters at the graph seam already
+                // decided by whichever attack mod made it, on `hold` and `off` alike.
+                //
+                // Delete this a release after 1.0.1, on the same schedule as the keys above.
             } else {
                 if (!unknownKeys.empty()) unknownKeys += ", ";
                 unknownKeys += key;
@@ -423,18 +414,17 @@ namespace ShoutMCO {
             // harness needs to show which side of that switch the run was on -- it is the
             // difference between "the engine did not arm" and "the engine was not allowed to".
             "[ShoutMCO] config (ini): enabled={} trace={} shoutWaitsForSwing={} chainWindowPct={} "
-            "powerSource={} "
             // As the FILE says them, not as the game got them -- `ApplyHoldOverrides` logs the
             // landed values separately, and a bug report wants both so a refused or clamped value
             // is visible as the difference between the two lines.
             "wordTwoHoldSec={:.3f} wordThreeHoldSec={:.3f} "
             "chainDriverCasts={} powerAdvanceWaitMs={} | (internal): reloadPerShout={} window={} ('{}') bufferMs={} cut='{}' "
-            "attack='{}' power='{}' holdSecs={:.2f} resume={} readyWindowMs={} motionWatchMs={} "
+            "attack='{}' power='{}' resume={} readyWindowMs={} motionWatchMs={} "
             "waitCapMs={} pressCapMs={} shoutCapMs={}",
-            enabled, trace, shoutWaitsForSwing, chainWindowPct, Describe(powerSource),
+            enabled, trace, shoutWaitsForSwing, chainWindowPct,
             wordTwoHoldSec, wordThreeHoldSec, chainDriverCasts, powerAdvanceWaitMs, reloadPerShout, Describe(windowSource),
             windowEvent, bufferMs,
-            cutEvent, attackEvent, powerAttackEvent, powerHoldSeconds, Describe(resumeMode),
+            cutEvent, attackEvent, powerAttackEvent, Describe(resumeMode),
             readyWindowMs, motionWatchMs, shoutWaitCapMs, pressOwnershipCapMs, shoutLivenessCapMs);
 
         static std::atomic<std::size_t> lastLogged{0};

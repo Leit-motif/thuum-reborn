@@ -6,6 +6,7 @@
 
 #include "AttackSeam.h"
 #include "Settings.h"
+#include "RuntimeHooks.h"
 #include "ShoutChainEngine.h"
 #include "Trace.h"
 
@@ -27,13 +28,6 @@ namespace ShoutMCO {
         using ProcessButton_t = void (*)(RE::AttackBlockHandler*, RE::ButtonEvent*, RE::PlayerControlsData*);
         ProcessButton_t g_originalProcessButton = nullptr;
 
-        // The handler's own power-attack threshold, which already reflects the player's
-        // `fInitialPowerAttackDelay`. Reading it beats inventing a constant that would disagree
-        // with their game.
-        float GameHoldThreshold(const RE::AttackBlockHandler* a_self) {
-            return a_self ? a_self->initialPowerAttackDelay : 0.0f;
-        }
-
         std::string_view DescribeEdge(const RE::ButtonEvent* a_event) {
             if (a_event->IsDown()) return "down"sv;
             // Matches what the engine now ACTS on: a zero-value event is a release whether or not
@@ -47,7 +41,7 @@ namespace ShoutMCO {
         void Hook_ProcessButton(RE::AttackBlockHandler* a_self, RE::ButtonEvent* a_event,
                                 RE::PlayerControlsData* a_data) {
             if (IsRightAttack(a_event) &&
-                ShoutChainEngine::OnAttackButton(*a_event, GameHoldThreshold(a_self))) {
+                ShoutChainEngine::OnAttackButton(*a_event)) {
                 return;
             }
 
@@ -92,7 +86,7 @@ namespace ShoutMCO {
 
         void Hook_UpdateHeldStateActive(RE::AttackBlockHandler* a_self, const RE::ButtonEvent* a_event) {
             if (IsRightAttack(a_event) &&
-                ShoutChainEngine::OnAttackHold(*a_event, GameHoldThreshold(a_self))) {
+                ShoutChainEngine::OnAttackHold()) {
                 return;
             }
 
@@ -194,9 +188,16 @@ namespace ShoutMCO {
         // directional variants all arrive here as an `attackPowerStart*` event, so matching the
         // event rather than the key is what makes the buffer source-agnostic.
         //
-        // (BFCO does not come through here -- it plays a `TESIdleForm` through `AIProcess::PlayIdle`
-        // instead. That path is deferred to the MCO-to-BFCO migration project by the ticket's own
-        // scope ruling; this seam is the designed-for place to add it.)
+        // THIS PARAGRAPH USED TO SAY BFCO DOES NOT COME THROUGH HERE, and it was wrong. It read
+        // "(BFCO does not come through here -- it plays a `TESIdleForm` through `AIProcess::PlayIdle`
+        // instead...)", cited a scope ruling that exists nowhere in the tracker, and was never
+        // checked against a BFCO session. Struck against an archived Pandora + BFCO 3.100.8A trace,
+        // which recorded **219 power presses arriving at this seam** -- 194
+        // `attackPowerStartInPlace`, 7 `_Sprint`, and all four directionals (7 Backward, 4 Left,
+        // 4 Right, 3 Forward), the very variants the comment implied BFCO kept to itself.
+        //
+        // It matters because the power-press seam guard in `OnPowerAttackEvent` lives on this path. A reader who believed the old
+        // comment would conclude the guard is dead code under the stack the owner actually plays on.
         using NotifyAnimationGraph_t = bool (*)(RE::IAnimationGraphManagerHolder*, const RE::BSFixedString&);
         NotifyAnimationGraph_t g_originalNotifyAnimationGraph = nullptr;
 
@@ -235,9 +236,12 @@ namespace ShoutMCO {
         REL::Relocation<std::uintptr_t> vtbl{RE::VTABLE_AttackBlockHandler[0]};
 
         g_originalProcessButton =
-            reinterpret_cast<ProcessButton_t>(vtbl.write_vfunc(0x4, &Hook_ProcessButton));
+            reinterpret_cast<ProcessButton_t>(WriteVerifiedVFunc(
+                vtbl, InputHandlerSlot(0x4), &Hook_ProcessButton, "AttackBlockHandler::ProcessButton"));
         g_originalUpdateHeld =
-            reinterpret_cast<UpdateHeld_t>(vtbl.write_vfunc(0x5, &Hook_UpdateHeldStateActive));
+            reinterpret_cast<UpdateHeld_t>(WriteVerifiedVFunc(
+                vtbl, InputHandlerSlot(0x5), &Hook_UpdateHeldStateActive,
+                "AttackBlockHandler::UpdateHeldStateActive"));
 
         // `VTABLE_PlayerCharacter[3]` is the `IAnimationGraphManagerHolder` base. The index is
         // the order of the polymorphic bases by offset: `TESObjectREFR` is `TESForm` (0x00),
@@ -247,7 +251,8 @@ namespace ShoutMCO {
         // vtable is `NotifyAnimationGraph` (0x0 is the destructor).
         REL::Relocation<std::uintptr_t> playerVtbl{RE::VTABLE_PlayerCharacter[3]};
         g_originalNotifyAnimationGraph = reinterpret_cast<NotifyAnimationGraph_t>(
-            playerVtbl.write_vfunc(0x1, &Hook_NotifyAnimationGraph));
+            WriteVerifiedVFunc(playerVtbl, 0x1, &Hook_NotifyAnimationGraph,
+                               "PlayerCharacter::NotifyAnimationGraph"));
 
         log::info("[ShoutMCO] attack-input hooks installed");
         log::info("[ShoutMCO] power-attack seam installed on NotifyAnimationGraph "

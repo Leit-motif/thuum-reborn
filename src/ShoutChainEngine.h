@@ -1,5 +1,6 @@
 #pragma once
 #include "PCH.h"
+#include "SwingAdoption.h"
 
 namespace ShoutMCO {
     // Shout -> MCO attack chaining, direction one of three.
@@ -35,8 +36,12 @@ namespace ShoutMCO {
         // resolved 42ms too late and the chain was lost.
         // `a_gameHoldThreshold` is the handler's own `initialPowerAttackDelay`, so the hold that
         // counts as a power press is the one the player's game already uses.
-        static bool OnAttackButton(const RE::ButtonEvent& a_event, float a_gameHoldThreshold);
-        static bool OnAttackHold(const RE::ButtonEvent& a_event, float a_gameHoldThreshold);
+        static bool OnAttackButton(const RE::ButtonEvent& a_event);
+        // Takes no event and reads nothing from it. It exists to SWALLOW held events for a press
+        // this engine already owns, so the game cannot charge a power attack out of a button held
+        // on its behalf. It carried the game's hold threshold until the held
+        // button stopped being a power press here at all.
+        static bool OnAttackHold();
 
         // A power press, seen DOWNSTREAM OF THE KEY as an outgoing `attackPowerStart*` graph
         // event (`AttackSeam.h`). Every power-attack source -- vanilla's hold, One Click Power
@@ -99,7 +104,15 @@ namespace ShoutMCO {
             bool            attackLive = false;   // for the trace -- tells "no attack" from "attack running"
             bool            swingLanded = false;  // for the trace only; it decides nothing
         };
-        [[nodiscard]] static ShoutVerdict ShouldHoldShoutLocked();
+        //
+        // `a_swing` is the press's own reading of the game's attack state, taken before the lock
+        // with `ReadSwing`. It is what lets a swing the tracker never saw START -- every BFCO swing,
+        // since BFCO raises no `MCO_AttackInitiate` -- still hold the shout (see SwingAdoption.h).
+        [[nodiscard]] static ShoutVerdict ShouldHoldShoutLocked(SwingReading a_swing);
+
+        // `IsAttacking` and the actor's attack state, read together for `ShouldHoldShoutLocked`.
+        // A GAME read -- call it OUTSIDE the engine lock (EngineLock.h rule 2).
+        [[nodiscard]] static SwingReading ReadSwing(RE::Actor* a_actor);
 
         // MCO's combo counters, read off the graph in one place. A GAME read -- call it OUTSIDE
         // the engine lock (EngineLock.h rule 2) and hand the result to the `Locked` functions.

@@ -49,7 +49,7 @@ SKSEPluginLoad(const SKSE::LoadInterface* skse) {
     auto version = plugin->GetVersion();
     log::info("{} {} is loading...", plugin->GetName(), version);
 
-    SKSE::Init(skse);
+    SKSE::Init(skse, false);
 
     ShoutMCO::ShoutChainEngine::Install();
     ShoutMCO::AttackInputHook::Install();

@@ -1,4 +1,5 @@
 #include "PCH.h"
+#include "RuntimeHooks.h"
 #include "ShoutChainEngine.h"
 
 #include <array>
@@ -14,6 +15,7 @@
 #include "AttackSeam.h"
 #include "CastIntentApi.h"
 #include "ClipOwnedRelease.h"
+#include "ComboResetHold.h"
 #include "EngineLock.h"
 #include "Settings.h"
 #include "ShoutInputHook.h"
@@ -118,6 +120,12 @@ namespace ShoutMCO {
         struct ChainState {
             bool shoutActive = false;
             bool windowOpen = false;
+            // Whether the graph actually entered the shout state (`SBF_ShoutStart`) for this
+            // shout, as opposed to the engine merely having seen `BeginCastVoice`. Those are not
+            // the same event and the gap between them is where the shout-state leak lived: the game can
+            // answer a `BeginCastVoice` with `CastStop` ~16 ms later and never enter the state at
+            // all. See the `castRefused` branch in `Observe`.
+            bool shoutStateEntered = false;
             // When the shout began. A shout is only ever ended by an event -- `shoutStop`, or
             // `SBF_ShoutStop` -- so a shout that raises
             // neither leaves this state latched and every attack press swallowed behind it. See
@@ -393,6 +401,9 @@ namespace ShoutMCO {
             int    nextPowerAttack = 0;
             int    currentAttack = 0;
             int    currentPowerAttack = 0;
+            // A reading that would move the snapshot back to MCO's ready values, held until a
+            // later frame shows it was not the teardown reset. See `ComboResetHold.h`.
+            ComboResetHold resetHold{};
         };
         QueuedResume g_queuedResume;
 
@@ -465,6 +476,11 @@ namespace ShoutMCO {
         // a press made during it still queues instead of walking into the same silent refusal.
         bool g_mcoAttackEnding = false;
         bool g_mcoSwingLanded = false;
+        // The live attack was ADOPTED from a press's own game read rather than opened by an MCO
+        // initiate -- every BFCO swing (SwingAdoption.h). Only an adopted tracker may be dropped
+        // when a later press reads `IsAttacking` false: an MCO tracker legitimately stays live
+        // through a teardown that has already cleared it.
+        bool g_swingAdopted = false;
         // Whether we have already spent this attack's one cancel. Reset when an attack starts.
         bool g_cancelSent = false;
 
@@ -713,7 +729,7 @@ namespace ShoutMCO {
         // time: caching it is exactly the mistake this instrument exists to catch.
         std::uint32_t FrameCount() {
             auto* state = RE::BSGraphics::State::GetSingleton();
-            return state ? state->frameCount : 0u;
+            return state ? state->GetFrameCount() : 0u;
         }
 
         // GAME READS from here down to `MovementSummary` -- call them OUTSIDE the engine lock
@@ -729,6 +745,16 @@ namespace ShoutMCO {
             bool out = false;
             a_actor->GetGraphVariableBool(a_name, out);
             return out;
+        }
+
+        // FIRST PERSON -- THE CAMERA, READ FROM THE CAMERA AND NOT FROM THE GRAPH. In first person the
+        // player runs two graphs and `GetGraphVariable*` answers from the active one, which is
+        // the first-person graph: every MCO read comes back -999 there, which is how the camera
+        // was found in the historical log. `PlayerCamera` is the source of the fact rather than
+        // a symptom of it, and it does not depend on which graph a variable lives in.
+        bool IsFirstPersonCamera() {
+            auto* camera = RE::PlayerCamera::GetSingleton();
+            return camera && camera->IsInFirstPerson();
         }
 
         // `IsShouting` IS HERE FOR THE CHEAPEST DECIDING CELL IN THE DRIVER-CAST ARM.
@@ -1128,6 +1154,14 @@ namespace ShoutMCO {
             bool        cut = false;
             std::string cutEvent;
 
+            // A combo-index write with NO attack behind it. The chain's own write rides `fire`
+            // below, because normally the write and the attack are one decision. They are not when
+            // the game has already started the attack itself -- see the seam guard in
+            // `OnPowerAttackEvent` -- and the index still has to carry.
+            bool        carryResume = false;
+            const char* carryVar = nullptr;
+            int         carryIndex = 0;
+
             // ResumeAndAttack, planned under the lock from the resume state.
             bool        fire = false;
             bool        fireResume = false;
@@ -1158,6 +1192,7 @@ namespace ShoutMCO {
             bool          scheduleShoutChainRelease = false;
             double        scheduleShoutChainReleaseInMs = 0.0;
             std::string_view scheduleShoutChainReleaseReason{};
+            std::uint32_t    scheduleShoutChainReleaseGeneration = 0;
 
             // the C3 root. `setLock` writes `SHOUT_lock`; `raiseRoot` also
             // notifies `kLeaveLocomotionEvent`, which drives the vanilla `ShoutLocomotion -> ShoutStanding`
@@ -1403,6 +1438,19 @@ namespace ShoutMCO {
             // Nothing ended the shout; the engine gave up on it. The liveness cap, and the one
             // reason that is not the player finishing anything.
             kAbandoned,
+            // THE GAME REFUSED THE SHOUT BEFORE IT EVER BECAME ONE.
+            //
+            // `BeginCastVoice` is a request, not a shout. Pressed during a live attack the game
+            // can answer it with `CastStop` and never enter the shout state -- measured at 16 ms,
+            // with `IsShouting` false throughout. Nothing this engine ends on ever
+            // follows, so before this reason existed the state stayed latched until the 8 s
+            // liveness cap or the next shout overwrote it, swallowing attack presses the whole
+            // time.
+            //
+            // It is NOT `kAbandoned`. Abandonment means a shout ran and vanished; this one never
+            // started, and the difference matters for the press: the player pressed attack during
+            // something that turned out not to be a shout, so the press is theirs to get back.
+            kRefused,
         };
 
         void EndShoutLocked(const Settings& a_settings, ShoutEnd a_why, std::string_view a_reason,
@@ -1471,6 +1519,9 @@ namespace ShoutMCO {
         struct SampledCombo {
             ShoutChainEngine::ComboSnapshot v{};
             bool                            have = false;
+            // The renderer frame phase A ran in. `ComboResetHold` tells MCO's teardown reset from
+            // a combo wrap by whether an end marker shares the reading's frame.
+            std::uint32_t                   frame = 0;
         };
 
         // A SNAPSHOT IS NOT A MOMENT, IT IS THE LAST GOOD READING.
@@ -1489,6 +1540,29 @@ namespace ShoutMCO {
         // So the reading is refreshed on every graph event for as long as the attack is live and
         // the press is still queued. Logged only when the value CHANGES -- this runs on every
         // event, and a line per event is not an instrument, it is noise.
+        ComboReading ToReading(const ShoutChainEngine::ComboSnapshot& a_v) {
+            return {.nextAttack = a_v.nextAttack,
+                    .nextPowerAttack = a_v.nextPowerAttack,
+                    .currentAttack = a_v.currentAttack,
+                    .currentPowerAttack = a_v.currentPowerAttack};
+        }
+
+        ComboReading CommittedReadingLocked() {
+            return {.nextAttack = g_queuedResume.nextAttack,
+                    .nextPowerAttack = g_queuedResume.nextPowerAttack,
+                    .currentAttack = g_queuedResume.currentAttack,
+                    .currentPowerAttack = g_queuedResume.currentPowerAttack};
+        }
+
+        void CommitReadingLocked(const ComboReading& a_r) {
+            SHOUTMCO_TRACE("[{:10.2f}] >>> COMBO snapshot advanced: attack {}->{} power {}->{}", ElapsedMs(),
+                  g_queuedResume.nextAttack, a_r.nextAttack, g_queuedResume.nextPowerAttack, a_r.nextPowerAttack);
+            g_queuedResume.nextAttack = a_r.nextAttack;
+            g_queuedResume.nextPowerAttack = a_r.nextPowerAttack;
+            g_queuedResume.currentAttack = a_r.currentAttack;
+            g_queuedResume.currentPowerAttack = a_r.currentPowerAttack;
+        }
+
         void RefreshQueuedResumeLocked(const SampledCombo& a_sample) {
             if (!g_queuedResume.valid || !g_mcoAttackLive) return;
             if (!ShoutInputHook::IsHoldingBehindAttackLocked()) return;
@@ -1512,19 +1586,41 @@ namespace ShoutMCO {
             if (g_cancelSent || g_mcoAttackEnding) return;
             if (!a_sample.have) return;
 
+            // THE F1 ORDERING IS NOW HANDLED, not just described: the caveat above was observed
+            // in a driven trace -- MCO's reset landed 40 us
+            // before the end markers, in the same frame. A reading that moves a counter back to
+            // its ready value is HELD rather than committed; a later frame commits it (a real
+            // wrap), an end marker in its own frame drops it (the reset). Writes of 1 are not
+            // rejected, they are delayed by one frame. `ComboResetHold.h` carries the rule and its
+            // tests.
             const auto& s = a_sample.v;
-            if (s.nextAttack == g_queuedResume.nextAttack && s.nextPowerAttack == g_queuedResume.nextPowerAttack &&
-                s.currentAttack == g_queuedResume.currentAttack &&
-                s.currentPowerAttack == g_queuedResume.currentPowerAttack) {
-                return;
+            const auto  result = OnLiveComboReading(g_queuedResume.resetHold, CommittedReadingLocked(),
+                                                    ToReading(s), a_sample.frame);
+            if (result.releasedEarlier) {
+                SHOUTMCO_TRACE("[{:10.2f}] >>> COMBO held reading kept -- the attack was still live a frame "
+                      "later, so it was a wrap and not the teardown reset", ElapsedMs());
             }
+            if (result.commit) CommitReadingLocked(*result.commit);
+            if (result.heldNow) {
+                SHOUTMCO_TRACE("[{:10.2f}] >>> COMBO reading held: attack {}->{} power {}->{} moves to ready; "
+                      "kept only if the attack is still live next frame", ElapsedMs(),
+                      g_queuedResume.nextAttack, s.nextAttack, g_queuedResume.nextPowerAttack, s.nextPowerAttack);
+            }
+        }
 
-            SHOUTMCO_TRACE("[{:10.2f}] >>> COMBO snapshot advanced: attack {}->{} power {}->{}", ElapsedMs(),
-                  g_queuedResume.nextAttack, s.nextAttack, g_queuedResume.nextPowerAttack, s.nextPowerAttack);
-            g_queuedResume.nextAttack = s.nextAttack;
-            g_queuedResume.nextPowerAttack = s.nextPowerAttack;
-            g_queuedResume.currentAttack = s.currentAttack;
-            g_queuedResume.currentPowerAttack = s.currentPowerAttack;
+        // An end marker, `inRdy`, or the shout beginning: a reading held in this frame is MCO's
+        // teardown reset and goes; one held in an earlier frame is kept.
+        void SettleResetHoldLocked(std::string_view a_site, std::uint32_t a_frame) {
+            if (!g_queuedResume.valid || !g_queuedResume.resetHold.held) return;
+            if (const auto kept = SettleComboResetHold(g_queuedResume.resetHold, a_frame)) {
+                SHOUTMCO_TRACE("[{:10.2f}] >>> COMBO held reading kept at '{}' -- taken a frame earlier",
+                      ElapsedMs(), a_site);
+                CommitReadingLocked(*kept);
+            } else {
+                SHOUTMCO_TRACE("[{:10.2f}] >>> COMBO held reading DROPPED at '{}' -- same frame, so it was "
+                      "MCO's teardown reset; snapshot stays attack={} power={}",
+                      ElapsedMs(), a_site, g_queuedResume.nextAttack, g_queuedResume.nextPowerAttack);
+            }
         }
 
         // SKIP THE RECOVERY RATHER THAN WAIT IT OUT.
@@ -1813,6 +1909,7 @@ namespace ShoutMCO {
             g_mcoAttackLive = false;
             g_mcoAttackEnding = false;
             g_mcoSwingLanded = false;
+            g_swingAdopted = false;
             g_comboSampleWanted.store(false, std::memory_order_relaxed);
             g_advanceWaitArmed = false;
             a_emit.releaseHeld = true;
@@ -1827,6 +1924,7 @@ namespace ShoutMCO {
                 g_mcoAttackLive = true;
                 g_mcoAttackEnding = false;
                 g_mcoSwingLanded = false;
+                g_swingAdopted = false;
                 g_cancelSent = false;
                 // The kind, the baseline, and a fresh generation, all before the early
                 // return. The baseline is deliberately read from the SAMPLE rather than live: it is
@@ -1907,6 +2005,7 @@ namespace ShoutMCO {
             // not ready is silently refused. `g_mcoAttackLive` deliberately
             // stays true so a press made mid-teardown still queues.
             if (a_tag == "MCO_AttackExitNotify"sv || a_tag == "attackStop"sv) {
+                SettleResetHoldLocked(a_tag, a_sample.frame);
                 g_mcoAttackEnding = true;
                 g_mcoSwingLanded = false;
                 // The attack this deferral belongs to is ending, whether we asked for it
@@ -1934,9 +2033,11 @@ namespace ShoutMCO {
             // cast. Attack-queued holds do NOT release here: cancel `inRdy` still has
             // `IsAttacking` true.
             if (a_tag == "inRdy"sv) {
+                SettleResetHoldLocked(a_tag, a_sample.frame);
                 g_mcoAttackLive = false;
                 g_mcoAttackEnding = false;
                 g_mcoSwingLanded = false;
+                g_swingAdopted = false;
                 // Dropping the wait here rather than letting it expire keeps a
                 // late cut from racing the queued shout. `g_comboSampleWanted` stays set until
                 // the shout actually releases, so phase A keeps sampling `IsAttacking`.
@@ -2016,6 +2117,17 @@ namespace ShoutMCO {
             a_emit.fireFromSprint = g_state.whirlwindThisShout || g_state.sprintingAtBegin;
             a_emit.fireResume =
                 a_settings.resumeMode != Settings::ResumeMode::kOff && a_emit.fireIndex > 0;
+        }
+
+        // The resume write on its own, for a press whose attack the GAME has already started.
+        // Same index and same `resumeMode` gate as `ResumeAndAttackLocked`; only the event is
+        // missing, because the swing it would ask for is already running.
+        void CarryResumeWithoutAttackLocked(const Settings& a_settings, Emit& a_emit) {
+            const int index = g_state.resumePowerAttack;
+            if (a_settings.resumeMode == Settings::ResumeMode::kOff || index <= 0) return;
+            a_emit.carryResume = true;
+            a_emit.carryVar = "MCO_nextpowerattack";
+            a_emit.carryIndex = index;
         }
 
         // A press handed back before its queued shout ever began has no shout-owned resume state.
@@ -2123,6 +2235,7 @@ namespace ShoutMCO {
             a_emit.scheduleShoutChainRelease = true;
             a_emit.scheduleShoutChainReleaseInMs = 300.0;
             a_emit.scheduleShoutChainReleaseReason = "chain cut+delay"sv;
+            a_emit.scheduleShoutChainReleaseGeneration = g_shoutGeneration.load(std::memory_order_relaxed);
 
             a_emit.cut = true;
             a_emit.cutEvent = a_settings.cutEvent;
@@ -2164,29 +2277,6 @@ namespace ShoutMCO {
                   "already ended", ElapsedMs(), waited, Describe(g_state.pressKind));
             g_state.pressPending = false;
             ResumeAndAttackLocked(a_settings, g_state.pressKind, a_emit);
-        }
-
-        // Shared by the hold path (`UpdateHeldStateActive`) and any held event that does reach
-        // `ProcessButton`.
-        void ResolveAsPowerIfHeldEnoughLocked(const Settings& a_settings, float a_heldSeconds,
-                                              float a_gameThreshold, Emit& a_emit) {
-            // `pressPending` as well as `pressResolved`: once the chain has fired, further hold
-            // events are not a fresh decision to make.
-            if (!g_state.pressPending || g_state.pressResolved || !a_settings.HoldToPower()) return;
-
-            // The player's own threshold unless explicitly overridden. A constant of our own
-            // would disagree with their game whenever they have changed it.
-            const float threshold = a_settings.powerHoldSeconds >= 0.0f  ? a_settings.powerHoldSeconds
-                                    : a_gameThreshold > 0.0f             ? a_gameThreshold
-                                                                         : 0.3f;
-            if (a_heldSeconds < threshold) return;
-
-            g_state.pressKind = AttackKind::kPower;
-            g_state.pressResolved = true;
-            SHOUTMCO_TRACE("[{:10.2f}] >>> PRESS held to power ({:.2f}s >= {:.2f}s, {})", ElapsedMs(),
-                  a_heldSeconds, threshold,
-                  a_settings.powerHoldSeconds >= 0.0f ? "INI override"sv : "the game's own"sv);
-            TryFireChainLocked(a_settings, a_emit);
         }
 
         WindowCacheEntry* FindWindowLocked(const WindowKey& a_key) {
@@ -2792,6 +2882,7 @@ namespace ShoutMCO {
             // A live read here is only correct for a shout that began with no attack to remember.
             const double maxAgeMs =
                 static_cast<double>(a_settings.shoutWaitCapMs) + kQueuedResumeSlackMs;
+            SettleResetHoldLocked("shout begin"sv, a_live.frame);
             const bool   haveSnapshot = g_queuedResume.valid;
             const double ageMs = haveSnapshot ? ElapsedMs() - g_queuedResume.takenAtMs : 0.0;
             const bool   fromQueue = haveSnapshot && ageMs <= maxAgeMs;
@@ -2871,21 +2962,22 @@ namespace ShoutMCO {
         //   - RESOLVED     -> fire now. There is no shout left to cut, so `TryFireChainLocked`
         //                     takes its plain-attack branch. This is the hand-back, reached
         //                     from every player-facing exit instead of one.
-        //   - UNRESOLVED   -> leave `pressPending`, `pressResolved` and `pressOwned` exactly as
-        //                     they are. The button is still down and the player has not said what
-        //                     they meant by it yet, so the input hooks resolve it after the shout
-        //                     exactly as they would have during it: held past the threshold ->
-        //                     `OnAttackHold` -> `ResolveAsPowerIfHeldEnoughLocked` -> power;
-        //                     released short -> `OnAttackButton`'s release branch -> light; never
-        //                     released -> `WatchdogReleasePressLocked` at `pressOwnershipCapMs`.
-        //                     `ResolveAsPowerIfHeldEnoughLocked` already works post-shout -- its
-        //                     guard never mentions `shoutActive`, it only needs `pressPending` to
-        //                     survive, which is what this preserves.
+        //   - UNRESOLVED   -> UNREACHABLE NOW. Kept as a description of the branch
+        //                     because the RESOLVED rule above only makes sense against it.
+        //                     `OnAttackButton` now calls every press it takes light on the spot,
+        //                     so `pressResolved` is true from the moment of the down edge and
+        //                     nothing arrives here unresolved. It used to stay undecided while the
+        //                     held button was a power press: held past the threshold ->
+        //                     `OnAttackHold` -> power; released short -> light. That was vanilla's
+        //                     long-press, which this mod no longer supports (an owner
+        //                     ruling), and a power press now enters at the graph seam already
+        //                     decided by whichever attack mod made it.
         //   - ABANDONED    -> drop it, deliberately.
         //
-        // The worst case of the unresolved branch is that the attack lands later than the shout's
+        // ~~The worst case of the unresolved branch is that the attack lands later than the shout's
         // end by however long the player keeps holding. THAT IS WHAT HOLD-TO-POWER MEANS; it is the
-        // behaviour, not a failure mode.
+        // behaviour, not a failure mode.~~ Gone with the hold path: the attack now lands at the
+        // press, not at the release.
         //
         // TWO CANDIDATE FIXES WERE TRACED AND REJECTED, and they are recorded here so
         // neither is retried. "Resolve it as a light attack on the spot" always produces an attack
@@ -2935,7 +3027,7 @@ namespace ShoutMCO {
         // RESOLVED press buffered fires the attack. Removing the pre-spellfire split
         // widened the interval it happens in; it did not settle it. An
         // UNRESOLVED press is safe either way -- nothing fires at the interruption, the player's own
-        // release decides.
+        // release decides. That last sentence is now moot; see the UNRESOLVED note above.
         void EndShoutLocked(const Settings& a_settings, ShoutEnd a_why, std::string_view a_reason,
                             Emit& a_emit) {
             // Cleared before the early return, and unconditionally: an interruption that leaves the
@@ -2993,6 +3085,7 @@ namespace ShoutMCO {
                     a_emit.scheduleShoutChainRelease = true;
                     a_emit.scheduleShoutChainReleaseInMs = 300.0;
                     a_emit.scheduleShoutChainReleaseReason = "shoutStop+delay"sv;
+                    a_emit.scheduleShoutChainReleaseGeneration = g_shoutGeneration.load(std::memory_order_relaxed);
                     SHOUTMCO_TRACE("[{:10.2f}] >>> SHOUT→SHOUT armed at {} -- release in 300ms",
                           ElapsedMs(), a_reason);
                 } else {
@@ -3159,7 +3252,7 @@ namespace ShoutMCO {
         // has to run the emissions its own decision produces, exactly as `Observe` does.
         void PostWindowOpen(double a_delayMs, std::uint32_t a_generation);
         void PostAdvancePoll(double a_delayMs, std::uint32_t a_generation);
-        void PostShoutChainRelease(double a_delayMs, std::string_view a_reason);
+        void PostShoutChainRelease(double a_delayMs, std::string_view a_reason, std::uint32_t a_generation);
 
         // Phase C: everything one event decided to emit, in the order the old inline code emitted
         // it -- the release ahead of the restore, the graph emissions last.
@@ -3175,7 +3268,8 @@ namespace ShoutMCO {
             }
             if (a_emit.scheduleShoutChainRelease) {
                 PostShoutChainRelease(a_emit.scheduleShoutChainReleaseInMs,
-                                      a_emit.scheduleShoutChainReleaseReason);
+                                      a_emit.scheduleShoutChainReleaseReason,
+                                      a_emit.scheduleShoutChainReleaseGeneration);
             }
             if (a_emit.releaseHeld) {
                 ShoutInputHook::ReleaseHeldShout(a_emit.releaseReason);
@@ -3306,6 +3400,31 @@ namespace ShoutMCO {
                 });
             }
 
+            // WRITTEN HERE AND NOW, NOT DEFERRED, AND THE WHOLE FIX IS THAT ONE WORD.
+            //
+            // This ran through `Defer` for its first day and the write was USELESS: measured
+            // twice on one save, the engine carried `MCO_nextpowerattack=3` and the
+            // swing that followed landed on `power=2` -- combo step 1, the carry ignored. The
+            // deferred task drained 7 and 12 ms after the seam saw the event, and BFCO latches its
+            // power state machine's `startStateId` from this very variable when the attack ENTERS
+            // (`#bfco$392`), which happens inside the same graph update this hook sits in. Seven
+            // milliseconds late is late.
+            //
+            // The seam calls `OnPowerAttackEvent` and only THEN forwards the notify, so this whole
+            // function runs before the game processes the event. A direct write lands ahead of the
+            // latch. It is main-thread by construction -- the notify is a game call on the game's
+            // thread -- and `carryResume` is set on exactly one path, the guard in
+            // `OnPowerAttackEvent`, so no other caller can reach this synchronously.
+            //
+            // The owner's report is what this fixes: "it seems like shouts do not continue power
+            // attack combos for bfco".
+            if (a_emit.carryResume && a_actor) {
+                const bool landed = a_actor->SetGraphVariableInt(a_emit.carryVar, a_emit.carryIndex);
+                SHOUTMCO_TRACE("[{:10.2f}] >>> CHAIN carried {}={} with no attack of ours (written "
+                      "before the forward) landed={}  || {}",
+                      ElapsedMs(), a_emit.carryVar, a_emit.carryIndex, landed, GraphSummary(a_actor));
+            }
+
             if (a_emit.fire) {
                 const auto  kind = a_emit.fireKind;
                 const auto* var = a_emit.fireVar;
@@ -3317,9 +3436,9 @@ namespace ShoutMCO {
                 Defer(a_actor, [var, index, resume, kind, fromSprint = a_emit.fireFromSprint,
                                 evt = a_emit.fireEvent](RE::Actor* actor) {
                     if (resume) {
-                        actor->SetGraphVariableInt(var, index);
-                        SHOUTMCO_TRACE("[{:10.2f}] >>> CHAIN wrote {}={}  || {}", ElapsedMs(), var, index,
-                              GraphSummary(actor));
+                        const bool landed = actor->SetGraphVariableInt(var, index);
+                        SHOUTMCO_TRACE("[{:10.2f}] >>> CHAIN wrote {}={} landed={}  || {}", ElapsedMs(), var,
+                              index, landed, GraphSummary(actor));
                     }
 
                     // The player's INPUT, not the animation's flags: the shout is not a locomotive
@@ -3480,7 +3599,8 @@ namespace ShoutMCO {
                     // Phase A: the game call, before the lock. Cheaper to take it unconditionally
                     // than to take the lock twice, and it is four graph reads on a path that only
                     // runs mid-power-attack.
-                    const SampledCombo live{.v = ShoutChainEngine::SampleCombo(player), .have = true};
+                    const SampledCombo live{.v = ShoutChainEngine::SampleCombo(player), .have = true,
+                                            .frame = FrameCount()};
 
                     const auto settings = Settings::Snapshot();
                     Emit       emit;
@@ -3499,11 +3619,11 @@ namespace ShoutMCO {
             }).detach();
         }
 
-        void PostShoutChainRelease(double a_delayMs, std::string_view a_reason) {
+        void PostShoutChainRelease(double a_delayMs, std::string_view a_reason, std::uint32_t a_generation) {
             const auto delay = std::chrono::milliseconds(static_cast<long long>(a_delayMs));
             const auto reason = std::string{a_reason};
 
-            std::thread([delay, reason]() {
+            std::thread([delay, reason, a_generation]() {
                 std::this_thread::sleep_for(delay);
 
                 auto* task = SKSE::GetTaskInterface();
@@ -3513,10 +3633,19 @@ namespace ShoutMCO {
                     return;
                 }
 
-                task->AddTask([reason]() {
+                task->AddTask([reason, a_generation]() {
                     Emit emit;
                     {
                         std::scoped_lock lock(detail::g_engineLock);
+                        // The flags below are the CURRENT intent's; the generation says whether
+                        // it is still the intent this timer was armed for. A shout begun or a game
+                        // loaded since the arm bumps it, and that shout's own end re-arms with a
+                        // timer of its own -- the same guard `PostWindowOpen` carries.
+                        if (g_shoutGeneration.load(std::memory_order_relaxed) != a_generation) {
+                            SHOUTMCO_TRACE("[{:10.2f}] >>> SHOUT→SHOUT release dropped -- armed for an "
+                                  "earlier shout", ElapsedMs());
+                            return;
+                        }
                         if (!g_releaseShoutChainOnReady ||
                             !ShoutInputHook::IsHoldingBehindShoutLocked()) {
                             return;
@@ -3543,7 +3672,8 @@ namespace ShoutMCO {
         // RE::VTABLE_Character[2] would push several actors through state that assumes one. NPC
         // support is a state-model change, not a registration change.
         REL::Relocation<std::uintptr_t> vtblPC{RE::VTABLE_PlayerCharacter[2]};
-        _originalPC = vtblPC.write_vfunc(0x1, ProcessEvent_PC);
+        _originalPC = WriteVerifiedVFunc(vtblPC, 0x1, ProcessEvent_PC,
+                                        "PlayerCharacter::ProcessAnimationEvent");
 
         // A load carries no graph events across, so state left over from the session before it
         // -- an armed chain, an owned button -- would never be cleared by anything else.
@@ -3602,6 +3732,7 @@ namespace ShoutMCO {
                             g_mcoAttackLive = false;
                             g_mcoAttackEnding = false;
                             g_mcoSwingLanded = false;
+                            g_swingAdopted = false;
                             g_cancelSent = false;
                             // The generation bump is the load-bearing half. Clearing
                             // the flag stops a poll already asleep on its thread from acting; the
@@ -3636,6 +3767,11 @@ namespace ShoutMCO {
                             // reasoning for the next flag.
                             g_beginSeenPending = false;
                             g_readyExitPending = false;
+                            // The rolling combo position lives outside `ChainState` too, and its
+                            // 5 s age cap runs on a process clock a load does not reset -- so an
+                            // attack seconds before a quick-load could be carried into the loaded
+                            // session.
+                            g_rollingCombo = {};
                             AbandonQueuedResumeLockedImpl("game load"sv);
                             ShoutInputHook::ClearHeldOnLoadLocked();
                         }
@@ -3744,6 +3880,12 @@ namespace ShoutMCO {
 
         const bool isBegin = tag == "BeginCastVoice"sv;
 
+        // FIRST PERSON. Read at the two events that can arm the engine, and nowhere else: a
+        // containment check has to be made where the engine would otherwise take the shout.
+        // Declared before `driverArmPossible` is derived, so it is completed below once that
+        // local exists.
+        bool firstPerson = false;
+
         const bool isEndMarker =
             tag == "MCO_AttackExitNotify"sv || tag == "attackStop"sv || tag == "inRdy"sv;
         // State Behavior Framework's exit annotation on the shout state, and the ONLY event that
@@ -3769,6 +3911,14 @@ namespace ShoutMCO {
         // machine then started in `ShoutLocomotion` through its `startStateId` binding exactly as
         // if nothing had been sent. The whole shout then ran with the legs cycling.
         const bool isShoutStateEntry = tag == "SBF_ShoutStart"sv;
+
+        // A REFUSED SHOUT. The game's own way of saying it will not honour a shout it has already
+        // acknowledged. Both fire in ordinary play for reasons that have nothing to do with
+        // shouts -- `InterruptCast` on any interrupted spell, `CastStop` at the end of every cast
+        // -- so neither means anything on its own. What makes the pair a refusal is the company
+        // it keeps: a shout this engine has opened, which the graph never entered. That test is
+        // in the branch, not here.
+        const bool isCastTeardown = tag == "CastStop"sv || tag == "InterruptCast"sv;
 
         // State Behavior Framework's exit annotation on the READY state, and the second
         // half of the driver-cast discriminator -- see `g_readyExitPending` for the measurement that
@@ -3848,6 +3998,8 @@ namespace ShoutMCO {
         const bool driverArmPossible = isShoutStateEntry && settings->enabled && settings->chainDriverCasts;
 
         SampledCombo combo{};
+        // Stamped on every event, sampled or not: `ComboResetHold` compares frames at end markers.
+        combo.frame = FrameCount();
         if (isBegin || isInitiate || isHitFrame ||
             g_comboSampleWanted.load(std::memory_order_relaxed)) {
             combo.v = SampleCombo(actor);
@@ -3868,7 +4020,7 @@ namespace ShoutMCO {
         // about graph ordering. A separate local makes it unreachable by construction, for the
         // price of one variable, and leaves `TrackMcoAttackLocked` seeing byte-for-byte what it
         // sees now whether the feature is on or off.
-        SampledCombo driverLiveCombo{};
+        SampledCombo driverLiveCombo{.frame = combo.frame};
         if (driverArmPossible) {
             driverLiveCombo.v = SampleCombo(actor);
             driverLiveCombo.have = true;
@@ -3879,6 +4031,7 @@ namespace ShoutMCO {
         // pass fire plain attacks on real input. Read for a driver's arm too: a
         // hotbar-cast Whirlwind Sprint from a sprint deserves the same chain.
         const bool wasSprinting = (isBegin || driverArmPossible) && WasSprintingRecently(actor);
+        firstPerson = (isBegin || driverArmPossible) && IsFirstPersonCamera();
         // Read here, in phase A, because it is a game read (EngineLock.h rule 2) and
         // because `BeginCastVoice` is the one moment the selected power is still trustworthy.
         //
@@ -4006,7 +4159,30 @@ namespace ShoutMCO {
                 g_readyExitPending = true;
             }
 
-            if (isBegin) {
+            if (isBegin && firstPerson) {
+                // FIRST PERSON IS VANILLA'S, AND THE ENGINE DECLINES THE SHOUT HERE.
+                //
+                // Measured over two agent drives plus five owner shouts: in first person the
+                // pack's annotated exhale plays on the THIRD-person graph, `ReadPlayingClipSpellFire`
+                // walks every graph and finds it, ADR-0009 then withholds vanilla's 0.100 s generator
+                // fire -- and the clip's own late `Voice_SpellFire_Event` never reaches this sink.
+                // The shout the game is running never fires: no magic, no window, no cooldown. A
+                // second `BeginCastVoice` follows `shoutStop` 11-18 ms later with no state entry
+                // and no end behind it, and `OnAttackButton` then swallows every press until the
+                // liveness cap -- 8 s if the graph is ticking, 37.8 s measured standing still,
+                // because the cap is checked on graph events.
+                //
+                // Not vouching (`g_beginSeenPending` stays false) and not calling `BeginShoutLocked`
+                // is the whole containment: `shoutActive` stays false, so the spellfire branch below
+                // cannot intercept, no root lock is written, and the attack hook forwards. The
+                // owner's ruling is that first person is preserved as vanilla, not designed for.
+                //
+                // A camera switch DURING a shout is not handled here and is the one open cell
+                // a shout begun in third person keeps its ordinary exits and the cap.
+                SHOUTMCO_TRACE("[{:10.2f}] >>> SHOUT declined -- first person; vanilla owns this "
+                               "shout (no intercept, no lock, no press ownership)",
+                               ElapsedMs());
+            } else if (isBegin) {
                 // ADR-0006, LINE ONE. Set BEFORE the call, and the ordering is the whole reason the
                 // discriminator keys on this event instead of on the graph's route into the state.
                 // `BeginShoutLocked` returns before `shoutActive` when no shout is equipped, so a
@@ -4017,6 +4193,9 @@ namespace ShoutMCO {
                 BeginShoutLocked(*settings, combo, wasAttacking, windowKey, emit, /*driverCast*/ false,
                                  wasSprinting);
             } else if (isShoutStateEntry) {
+                // The shout is real from here: the graph is in the state, not merely asked to be.
+                g_state.shoutStateEntered = true;
+
                 // ADR-0006, LINE TWO -- *A DRIVER CAST IS A SHOUT-STATE ENTRY WITH NO
                 // `BeginCastVoice` BEHIND IT.*
                 //
@@ -4052,7 +4231,9 @@ namespace ShoutMCO {
                 // condition by construction.
                 const bool vouched = std::exchange(g_beginSeenPending, false);
                 const bool outOfReady = std::exchange(g_readyExitPending, false);
-                if (!vouched && outOfReady && !g_state.shoutActive && driverArmPossible) {
+                // `!firstPerson` is the first-person containment on the driver route: a hotbar cast in
+                // first person is the driver's to run as vanilla, for the same reason as above.
+                if (!vouched && outOfReady && !g_state.shoutActive && driverArmPossible && !firstPerson) {
                     // THE WIRING, AND IT IS THE ONE CALL THAT WAS BUILT AND LEFT
                     // INERT.
                     //
@@ -4198,6 +4379,24 @@ namespace ShoutMCO {
                           ElapsedMs(), ElapsedMs() - g_state.spellFiredAtMs);
                 }
                 EndShoutLocked(*settings, ShoutEnd::kStateExit, "SBF_ShoutStop"sv, emit);
+            } else if (isCastTeardown && g_state.shoutActive && !g_state.shoutStateEntered) {
+                // THE SHOUT THE GAME THREW AWAY.
+                //
+                // Ungated by `enabled`, like the two branches above it: a toggle flipped between
+                // `BeginCastVoice` and here must not strand the state this engine has already
+                // opened. That is the same reasoning as `inRdy` and the state exit, and it matters
+                // more here, because this is the ONLY exit for a shout that never entered the
+                // graph's shout state.
+                //
+                // `!shoutStateEntered` is doing all the work. Once `SBF_ShoutStart` has fired, a
+                // `CastStop` is just the cast machinery finishing behind a shout that is genuinely
+                // running, and ending on it would cut real shouts short. Before it, there is
+                // nothing to cut: the request was refused.
+                SHOUTMCO_TRACE("[{:10.2f}] >>> SHOUT refused by the game ({}) -- `SBF_ShoutStart` "
+                      "never fired, so no `shoutStop` or `SBF_ShoutStop` is coming; tearing the "
+                      "state down now instead of holding it to the {}ms liveness cap",
+                      ElapsedMs(), tag, settings->shoutLivenessCapMs);
+                EndShoutLocked(*settings, ShoutEnd::kRefused, tag, emit);
             } else if (settings->enabled) {
                 if (isSpellFire) {
                     // ADR-0009. When the playing exhale owns a late annotation, the
@@ -4290,7 +4489,7 @@ namespace ShoutMCO {
         return !interceptGenerator;
     }
 
-    bool ShoutChainEngine::OnAttackButton(const RE::ButtonEvent& a_event, float a_gameHoldThreshold) {
+    bool ShoutChainEngine::OnAttackButton(const RE::ButtonEvent& a_event) {
         const auto settings = Settings::Snapshot();
         if (!settings->enabled) return false;
 
@@ -4317,11 +4516,11 @@ namespace ShoutMCO {
                     g_state.pressedAtMs = ElapsedMs();
                     g_state.pressKind = AttackKind::kLight;
                     g_state.waitingForShoutStart = queuedShout;
-                    // While the power press is a hold, this press is not yet a light attack: the
-                    // game itself only decides at the threshold or on release, and deciding
-                    // earlier here is what would make a power chain unreachable. With a dedicated
-                    // power key there is nothing to wait for, so a light attack stays crisp.
-                    g_state.pressResolved = !settings->HoldToPower();
+                    // Light, immediately. A power press is recognised at the graph seam
+                    // (`AttackSeam.h`), where the attack mod has already decided, so there is
+                    // nothing here to wait and see about. This used to hang on the held-button
+                    // threshold, which is the vanilla power path the mod no longer supports.
+                    g_state.pressResolved = true;
 
                     if (queuedShout) {
                         SHOUTMCO_TRACE("[{:10.2f}] >>> PRESS taken (waiting for queued shout to start)",
@@ -4354,9 +4553,6 @@ namespace ShoutMCO {
                               a_event.HeldDuration());
                         TryFireChainLocked(*settings, emit);
                     }
-                } else {
-                    ResolveAsPowerIfHeldEnoughLocked(*settings, a_event.HeldDuration(),
-                                                     a_gameHoldThreshold, emit);
                 }
                 // We own this press either way, so the game must not see any of its events.
                 consumed = true;
@@ -4367,7 +4563,7 @@ namespace ShoutMCO {
         return consumed;
     }
 
-    bool ShoutChainEngine::OnAttackHold(const RE::ButtonEvent& a_event, float a_gameHoldThreshold) {
+    bool ShoutChainEngine::OnAttackHold() {
         const auto settings = Settings::Snapshot();
         if (!settings->enabled) return false;
 
@@ -4379,9 +4575,9 @@ namespace ShoutMCO {
         {
             std::scoped_lock lock(detail::g_engineLock);
             if (g_state.pressOwned) {
-                ResolveAsPowerIfHeldEnoughLocked(*settings, a_event.HeldDuration(), a_gameHoldThreshold,
-                                                 emit);
-                // We own this press, so the game must not charge a power attack of its own from it.
+                // Nothing to decide -- the press was called light when we took it. This still has
+                // to consume the event so the game cannot charge a power attack of its own out of
+                // a button we are holding on its behalf.
                 consumed = true;
             }
         }
@@ -4440,6 +4636,11 @@ namespace ShoutMCO {
         {
             std::scoped_lock lock(detail::g_engineLock);
             TryCutForShoutChainLocked(*settings, emit);
+            // A press held behind a swing that has ALREADY landed is owed its cut now, not at the
+            // next graph event. On the adopted BFCO path that event came 17 ms after the press in
+            // one trial and 137 ms in another, and the follow-through played through the gap. Every
+            // precondition (landed, holding, not yet cut, no advance wait) is rechecked inside.
+            TryCancelRecoveryLocked(emit);
         }
         ExecuteEmits(emit, player);
     }
@@ -4496,7 +4697,17 @@ namespace ShoutMCO {
         AbandonQueuedResumeLockedImpl(a_reason);
     }
 
-    ShoutChainEngine::ShoutVerdict ShoutChainEngine::ShouldHoldShoutLocked() {
+    SwingReading ShoutChainEngine::ReadSwing(RE::Actor* a_actor) {
+        SwingReading out{};
+        if (!a_actor) return out;
+        out.isAttacking = GraphBool(a_actor, "IsAttacking");
+        if (const auto* state = a_actor->AsActorState()) {
+            out.attackState = static_cast<int>(state->GetAttackState());
+        }
+        return out;
+    }
+
+    ShoutChainEngine::ShoutVerdict ShoutChainEngine::ShouldHoldShoutLocked(SwingReading a_swing) {
         // Never asks about shout cooldown, and never asks whether the player *may* shout. Only
         // whether an MCO attack is running, or whether the current shout's legal chain window is
         // open (ADR-0002: issue the attempt, let the game refuse it).
@@ -4526,6 +4737,47 @@ namespace ShoutMCO {
         // A live MCO attack wins over an open shout window when both could apply (a
         // shout press mid-attack during someone else's shout is still "behind the attack"). The
         // shout-window hold is otherwise the same one-entry buffer, released at `shoutStop`.
+        //
+        // AN ADOPTED TRACKER THE GAME SAYS IS OVER IS DROPPED FIRST. An adopted swing has no
+        // initiate to reset it, so if its `inRdy` never reached the sink -- the hold was replaced
+        // or abandoned before the swing ended -- `g_mcoAttackLive` would hold the NEXT press behind
+        // an attack that finished long ago. The press's own read is the fresher fact.
+        if (g_swingAdopted && g_mcoAttackLive && !a_swing.isAttacking) {
+            g_mcoAttackLive = false;
+            g_mcoAttackEnding = false;
+            g_mcoSwingLanded = false;
+            g_swingAdopted = false;
+            SHOUTMCO_TRACE("[{:10.2f}] >>> SWING adopted earlier is over (IsAttacking=false) -- tracker dropped",
+                           ElapsedMs());
+        }
+
+        // THE SWING NOBODY ANNOUNCED. BFCO raises no MCO initiate, so the tracker is shut through
+        // its whole swing; the press asks the game instead and, if a melee swing is up, opens the
+        // tracker exactly as an initiate would. From here the existing path runs unchanged: the
+        // next `HitFrame` (or, past the hit, the next event) cuts the recovery, and the release
+        // waits for `IsAttacking` to fall.
+        //
+        // Not a power attack as far as the advance wait is concerned: the wait compares
+        // `MCO_nextpowerattack` against a reading taken at the initiate, and an adopted swing has
+        // no initiate reading to compare against. `ArmAdvanceWaitLocked` refuses on a zero baseline.
+        if (const auto adoption = DecideSwingAdoption(g_mcoAttackLive, a_swing);
+            adoption != SwingAdoption::kNone) {
+            g_mcoAttackLive = true;
+            g_mcoAttackEnding = false;
+            g_mcoSwingLanded = adoption == SwingAdoption::kAfterHit;
+            g_swingAdopted = true;
+            g_cancelSent = false;
+            g_mcoPowerAttack = false;
+            g_powerAtInitiate = 0;
+            g_advanceWaitArmed = false;
+            g_attackGeneration.fetch_add(1, std::memory_order_relaxed);
+            SHOUTMCO_TRACE("[{:10.2f}] >>> SWING adopted from the game's own state (attackState={}, {}) "
+                           "-- no MCO initiate opened it",
+                           ElapsedMs(), a_swing.attackState,
+                           g_mcoSwingLanded ? "already landed, cut on the next event"sv
+                                            : "hit still to come, cut at HitFrame"sv);
+        }
+
         if (g_mcoAttackLive) {
             return ShoutVerdict{.hold = true,
                                 .reason = ShoutHoldReason::kBehindAttack,
@@ -4550,6 +4802,14 @@ namespace ShoutMCO {
         // Sampled before the lock (a game read); composed only when the trace will use it.
         const std::string summary = TraceEnabled() ? MovementSummary(player) : std::string{};
 
+        // The game's own attack state, sampled here for the trace rather than for the decision
+        // below. The decision is structural (see the guard); this is the reading that says whether
+        // the state has caught up to the event yet, which nothing had ever measured at this edge.
+        int attackState = -1;
+        if (auto* state = player->AsActorState()) {
+            attackState = static_cast<int>(state->GetAttackState());
+        }
+
         Emit emit;
         bool consumed = false;
         {
@@ -4570,18 +4830,49 @@ namespace ShoutMCO {
             // and the watchdog replaying the press five seconds late. Owner: "i kind've don't care
             // about buffering if it's causing more problems than the edge-case it solves."
             if (settings->enabled && g_state.shoutActive) {
-                // An outgoing `attackPowerStart*` is unambiguous the moment it is sent -- whichever
-                // mod decided it, the decision is already made, so this direction fires immediately
-                // where the hold path has to wait its threshold out.
-                g_state.pressPending = true;
-                g_state.pressResolved = true;
-                g_state.pressedAtMs = ElapsedMs();
-                g_state.pressKind = AttackKind::kPower;
-                g_state.waitingForShoutStart = false;
+                SHOUTMCO_TRACE("[{:10.2f}] >>> POWER EVENT \"{}\" (window {}, attackState={})", ElapsedMs(),
+                      a_eventName, g_state.windowOpen ? "open"sv : "shut"sv, attackState);
 
-                SHOUTMCO_TRACE("[{:10.2f}] >>> POWER EVENT \"{}\" (window {})", ElapsedMs(), a_eventName,
-                      g_state.windowOpen ? "open"sv : "shut"sv);
-                TryFireChainLocked(*settings, emit);
+                // NEVER CUT THE SHOUT FOR A PRESS THE GAME HAS ALREADY ACTED ON.
+                //
+                // A press that reaches this function is an OUTGOING `attackPowerStart*` on the
+                // player, and the seam forwards it, so by the time anything here decides anything
+                // the game is starting that power attack. Cutting the shout to provoke a return to
+                // ready therefore waits for a pass that cannot arrive -- the graph is already doing
+                // the thing the cut asked for. Measured under Pandora + BFCO: every in-window power
+                // press was cut, armed, and then dropped by the watchdog (0 of 3 in the archived
+                // session, 0 of 5 across the whole log), while the light path, whose attack the
+                // engine fires itself, got its ready pass back in 6-29 ms, 24 times out of 24.
+                //
+                // The player never saw the loss, because the game's own power attack came out
+                // anyway. That is the reason to fix it rather than shrug: the result was correct by
+                // accident of BFCO's timing, and the shout was being cut on our schedule instead of
+                // ending on its own.
+                //
+                // WHY THE GUARD IS THE PATH AND NOT `attackState`. The state read above is the
+                // honest instrument and it is logged, but it is a race at this edge -- the engine
+                // sets it while processing the very event being forwarded, so a read here can
+                // legitimately be 0 for an attack that is already committed. What the press CAME
+                // THROUGH is not a race.
+                //
+                // The window-shut case is deliberately untouched: it holds the press and hands it
+                // back at `SBF_ShoutStop`, with no cut, and that path already works.
+                if (g_state.windowOpen) {
+                    SHOUTMCO_TRACE("[{:10.2f}] >>> POWER EVENT \"{}\" -- the game owns this attack; carrying "
+                          "the combo index and leaving the shout to end on its own (no cut, no arm)",
+                          ElapsedMs(), a_eventName);
+                    CarryResumeWithoutAttackLocked(*settings, emit);
+                } else {
+                    // An outgoing `attackPowerStart*` is unambiguous the moment it is sent --
+                    // whichever mod decided it, the decision is already made, so this direction
+                    // resolves immediately where the hold path has to wait its threshold out.
+                    g_state.pressPending = true;
+                    g_state.pressResolved = true;
+                    g_state.pressedAtMs = ElapsedMs();
+                    g_state.pressKind = AttackKind::kPower;
+                    g_state.waitingForShoutStart = false;
+                    TryFireChainLocked(*settings, emit);
+                }
                 consumed = true;
             }
         }

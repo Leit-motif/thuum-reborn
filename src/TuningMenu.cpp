@@ -51,7 +51,6 @@ namespace ShoutMCO::TuningMenu {
             bool  synced = false;
             bool  trace = false;
             float wordTwoHoldSec = 0.4f;
-            int   powerSource = 0;
 
             // The last write's outcome, shown under the buttons. A failed write is otherwise
             // completely silent: the slider stays where the player put it and the game keeps
@@ -61,16 +60,6 @@ namespace ShoutMCO::TuningMenu {
 
         UiState g_ui;
 
-        const char* const kPowerSourceItems[] = {"hold", "off"};
-
-        int PowerSourceIndex(Settings::PowerSource a_source) {
-            return a_source == Settings::PowerSource::kOff ? 1 : 0;
-        }
-
-        const char* PowerSourceWord(Settings::PowerSource a_source) {
-            return kPowerSourceItems[PowerSourceIndex(a_source)];
-        }
-
         // Pull the widgets back onto whatever the engine last parsed. `Load()` first, so an INI
         // hand-edited since the last shout -- or one never read at all, because no shout has
         // happened this session -- is what the player sees rather than the compiled defaults.
@@ -79,7 +68,6 @@ namespace ShoutMCO::TuningMenu {
             const auto settings = Settings::Snapshot();
             g_ui.trace = settings->trace;
             g_ui.wordTwoHoldSec = settings->wordTwoHoldSec;
-            g_ui.powerSource = PowerSourceIndex(settings->powerSource);
             g_ui.synced = true;
         }
 
@@ -166,19 +154,6 @@ namespace ShoutMCO::TuningMenu {
             }
             if (commit) WriteFloat("Shout", "fWordTwoHoldSec", g_ui.wordTwoHoldSec);
 
-            if (ImGuiMCP::Combo("Held attack is a power attack", &g_ui.powerSource, kPowerSourceItems, 2)) {
-                Write("Chain", "sPowerSource", kPowerSourceItems[g_ui.powerSource]);
-            }
-            if (ImGuiMCP::IsItemHovered()) {
-                ImGuiMCP::SetTooltip(
-                    "Whether a HELD attack button counts as a power press. A power attack mod\'s "
-                    "own key chains either way.\n\n"
-                    "hold = yes, as in vanilla and MCO alone.\n"
-                    "off = a held button is a light attack. Shouts still chain into it.\n\n"
-                    "Set this to off if you use One Click Power Attack or Elden Power Attack, "
-                    "where HOLDING attack is not a power attack.");
-            }
-
             if (ImGuiMCP::Checkbox("Diagnostic log (takes effect on restart)", &g_ui.trace)) {
                 WriteBool("Engine", "bTrace", g_ui.trace);
             }
@@ -194,7 +169,6 @@ namespace ShoutMCO::TuningMenu {
             const auto settings = Settings::Snapshot();
 
             ImGuiMCP::SeparatorText("Status");
-            ImGuiMCP::Text("Held attack is a power attack: %s", PowerSourceWord(settings->powerSource));
             ImGuiMCP::Text("Diagnostic log this session: %s", Settings::TraceLive() ? "on" : "off");
             ImGuiMCP::TextWrapped("Fixed limits. Not settings -- listed so you can quote them in a "
                                   "bug report.");
@@ -220,7 +194,6 @@ namespace ShoutMCO::TuningMenu {
                 // would undo the pruning in front of the player.
                 const Settings defaults{};
                 WriteBool("Engine", "bTrace", defaults.trace);
-                Write("Chain", "sPowerSource", PowerSourceWord(defaults.powerSource));
                 WriteFloat("Shout", "fWordTwoHoldSec", defaults.wordTwoHoldSec);
                 g_ui.status = "defaults written to ShoutMCO.ini";
             }

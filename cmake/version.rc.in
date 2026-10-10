@@ -21,6 +21,9 @@ BEGIN
 			VALUE "FileVersion", "@PROJECT_VERSION@.0"
 			VALUE "InternalName", "@PROJECT_NAME@"
 			VALUE "CompanyName", "Leitmotives"
+			// The commit this binary was built from, read back by tools/package.ps1 so a DLL
+			// cannot be shipped under another tree's commit. See cmake/GitStamp.cmake.
+			VALUE "Comments", "commit @SHOUTMCO_GIT_COMMIT@"
 			VALUE "LegalCopyright", "Copyright (C) 2026 Leitmotives. Licensed under GPL-3.0-or-later."
 			VALUE "ProductName", "@PROJECT_NAME@"
 			VALUE "ProductVersion", "@PROJECT_VERSION@.0"

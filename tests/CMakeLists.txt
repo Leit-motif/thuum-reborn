@@ -53,3 +53,7 @@ shoutmco_host_test(settings_ini_parity_tests settings_ini_parity_tests.cpp)
 shoutmco_host_test(ini_rewrite_tests ini_rewrite_tests.cpp)
 # The power-attack seam: the outgoing-event match rule and its re-entrancy guard. No game types.
 shoutmco_host_test(attack_seam_tests attack_seam_tests.cpp)
+# MCO's teardown reset held one frame before it reaches the queued snapshot. No game types.
+shoutmco_host_test(combo_reset_hold_tests combo_reset_hold_tests.cpp)
+# A swing no MCO initiate announced (BFCO), adopted from the game's own attack state. No game types.
+shoutmco_host_test(swing_adoption_tests swing_adoption_tests.cpp)

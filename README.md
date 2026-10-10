@@ -1,7 +1,7 @@
 # Thu'um Reborn
 
-Full MCO support for shouts. Press attack during a shout and the attack comes out at once,
-resuming your MCO combo where it left off rather than restarting it; press shout during a swing
+Full MCO and BFCO support for shouts. Press attack during a shout and the attack comes out at
+once, resuming your combo where it left off rather than restarting it; press shout during a swing
 and the swing lands first, so the hit is no longer eaten. Shout during a shout and the first
 one's exhale is cut rather than played out.
 
@@ -35,14 +35,22 @@ exceptions carry `animmotion` root-motion entries, which are motion data rather 
 Anything built on annotations would require every pack author to re-annotate.
 
 A behaviour patch does ship — `nemesis/` roots the player during the shout, which the graph
-cannot do on its own — so Nemesis is a requirement and a run is needed after installing.
+cannot do on its own — so a behaviour engine is a requirement and a run is needed after
+installing. Nemesis or Pandora; the patch generates under either and the player picks one.
 
 ## Requirements
 
-SKSE64, Address Library, Nemesis, Payload Interpreter, Open Animation Replacer, ADXP | MCO,
-State Behavior Framework, and SYHO - Shout Your Heart Out. Any power attack mod is optional and
-needs no configuration: the power press is recognised on the animation graph, downstream of
-whichever key started it.
+SKSE64, Address Library, Payload Interpreter, Open Animation Replacer, State Behavior Framework,
+and SYHO - Shout Your Heart Out.
+
+**Nemesis or Pandora**, whichever you use — the behaviour patch generates under either.
+
+**ADXP | MCO or BFCO**, whichever you play with.
+
+**One Click Power Attack NG** is required on MCO, which has no power attack of its own, and
+optional on BFCO, which has one built in. It is not detected: a power press is recognised as the
+`attackPowerStart*` graph event every power source emits, so any mod that starts a power attack
+the normal way works without the engine knowing it exists.
 
 **SKSE Menu Framework is optional.** With it installed the mod registers an in-game page under
 *Thu'um Reborn* for tuning the feel values live; without it the plugin logs one line and the INI
