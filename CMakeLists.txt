@@ -8,7 +8,7 @@ project(
 	ShoutMCO
 	# Bumped the moment shipped src/ moves past the last release rather than at the next one. A
 	# window where two different binaries both called themselves 1.0.0 is what that rule cost.
-	VERSION 1.0.2
+	VERSION 1.0.3
 	# The PUBLIC name, settled 2026-08-29. The version resource stamps FileDescription from
 	# PROJECT_NAME instead, so this string never reaches the binary -- but it is what a reader
 	# of this file takes the mod to be called.
@@ -159,6 +159,15 @@ if(SHOUTMCO_BUILD_RUNTIME_PROBE)
 	target_compile_definitions(runtime_layout_tests PRIVATE ENABLE_COMMONLIBSSE_TESTING)
 	target_include_directories(runtime_layout_tests PRIVATE "${SHOUTMCO_SRC_DIR}")
 	target_link_libraries(runtime_layout_tests PRIVATE CommonLibSSE::CommonLibSSE)
+endif()
+
+# Opt-in test plugin. Never staged to dist/ or included in release packaging.
+option(SHOUTMCO_BUILD_NEUTRAL_QA "Build the SE-only neutral shout runtime probe" OFF)
+if(SHOUTMCO_BUILD_NEUTRAL_QA)
+	add_library(ShoutNeutralProbe SHARED tests/neutral_runtime/probe.cpp)
+	target_compile_features(ShoutNeutralProbe PRIVATE cxx_std_23)
+	target_compile_options(ShoutNeutralProbe PRIVATE /EHsc /Zc:preprocessor)
+	target_link_libraries(ShoutNeutralProbe PRIVATE CommonLibSSE::CommonLibSSE spdlog::spdlog)
 endif()
 
 # Stage to dist/ only. Deployment into the MO2 mods folder is a deliberate, separate

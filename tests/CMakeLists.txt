@@ -57,3 +57,11 @@ shoutmco_host_test(attack_seam_tests attack_seam_tests.cpp)
 shoutmco_host_test(combo_reset_hold_tests combo_reset_hold_tests.cpp)
 # A swing no MCO initiate announced (BFCO), adopted from the game's own attack state. No game types.
 shoutmco_host_test(swing_adoption_tests swing_adoption_tests.cpp)
+# The caller lifecycle spans three production functions. Compile their current
+# bodies with bounded IO shims so a stale tracker cannot hide behind a green
+# release-policy unit test. The reproduction driver uses the Windows toolchain.
+if(WIN32)
+	find_package(Python3 REQUIRED COMPONENTS Interpreter)
+	add_test(NAME neutral_shout_lifecycle_tests
+		COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/../tools/repro-neutral-shout.py")
+endif()

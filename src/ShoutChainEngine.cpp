@@ -1903,8 +1903,17 @@ namespace ShoutMCO {
                 .isAttacking = a_isAttacking,
                 .capElapsed = capElapsed,
             });
-            if (action == AttackQueuedAction::kHold) {
+            // Retiring a finished attack is independent of releasing a pending cast.
+            // With no cast waiting, the release policy returns kHold; that must not
+            // leave an ordinary MCO tracker live after an idle attackStop. Graphs
+            // without a later inRdy would otherwise queue the next neutral shout
+            // behind this already-finished attack.
+            if (action == AttackQueuedAction::kHold && a_isAttacking) {
                 return;
+            }
+            if (g_mcoAttackLive && action == AttackQueuedAction::kHold) {
+                SHOUTMCO_TRACE("[{:10.2f}] >>> ATTACK tracker retired at '{}' with no queued cast "
+                               "(IsAttacking=false)", ElapsedMs(), a_tag);
             }
             g_mcoAttackLive = false;
             g_mcoAttackEnding = false;
@@ -1912,6 +1921,9 @@ namespace ShoutMCO {
             g_swingAdopted = false;
             g_comboSampleWanted.store(false, std::memory_order_relaxed);
             g_advanceWaitArmed = false;
+            if (action == AttackQueuedAction::kHold) {
+                return;  // No pending cast: cleanup only, never synthesize input.
+            }
             a_emit.releaseHeld = true;
             a_emit.releaseReason = action == AttackQueuedAction::kCapRelease
                                        ? "cap -- no shout-admissible ready"sv
