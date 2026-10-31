@@ -69,6 +69,7 @@ SHIMS = r'''
 #include <cstdio>
 #include <string_view>
 #include "AttackQueuedRelease.h"
+#include "ReadyEvent.h"
 #include "SwingAdoption.h"
 using namespace std::literals;
 using namespace ShoutMCO;
@@ -141,9 +142,9 @@ int main() {
     check(emit.releaseHeld && !ShouldHoldShoutLocked({false, 0}).hold,
           "control: queued shout gets released and clears tracker");
     reset();
-    event("MCO_AttackInitiate", true); event("inRdy", false);
+    event("MCO_AttackInitiate", true); event("SBF_ReadyStart", false);
     check(!ShouldHoldShoutLocked({false, 0}).hold,
-          "control: graph emitting inRdy clears tracker");
+          "control: graph entering ready (SBF_ReadyStart) clears tracker, no Jumping Attack needed");
     reset();
     auto before = ShouldHoldShoutLocked({true, 1});
     check(before.hold && !ShouldHoldShoutLocked({false, 0}).hold,

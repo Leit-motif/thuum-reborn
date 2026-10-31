@@ -17,6 +17,7 @@
 #include "ClipOwnedRelease.h"
 #include "ComboResetHold.h"
 #include "EngineLock.h"
+#include "ReadyEvent.h"
 #include "Settings.h"
 #include "ShoutInputHook.h"
 #include "Trace.h"
@@ -1392,7 +1393,7 @@ namespace ShoutMCO {
             if (since <= static_cast<double>(a_settings.readyWindowMs)) return;
 
             g_state.awaitingReady = false;
-            SHOUTMCO_TRACE("[{:10.2f}] >>> CHAIN dropped: no `inRdy` within the cap -- {:.1f}ms since the "
+            SHOUTMCO_TRACE("[{:10.2f}] >>> CHAIN dropped: no `SBF_ReadyStart` within the cap -- {:.1f}ms since the "
                   "cut (cap {}ms). The graph has not returned to ready, so the pass this chain armed "
                   "against is too late to be ours whether or not one arrives later. The shout was cut "
                   "and the attack is owed, so this press is LOST -- said out loud rather than waited "
@@ -2044,7 +2045,7 @@ namespace ShoutMCO {
             // same-frame `inRdy` here is the shout's exit bundle and must not deliver the next
             // cast. Attack-queued holds do NOT release here: cancel `inRdy` still has
             // `IsAttacking` true.
-            if (a_tag == "inRdy"sv) {
+            if (a_tag == kReadyEvent) {
                 SettleResetHoldLocked(a_tag, a_sample.frame);
                 g_mcoAttackLive = false;
                 g_mcoAttackEnding = false;
@@ -2754,7 +2755,7 @@ namespace ShoutMCO {
                       ElapsedMs() - heldPressedAtMs, heldResolved ? Describe(heldKind) : "unresolved"sv);
             }
             if (wasArmed) {
-                SHOUTMCO_TRACE("[{:10.2f}] >>> CHAIN dropped: a new shout began before `inRdy`", ElapsedMs());
+                SHOUTMCO_TRACE("[{:10.2f}] >>> CHAIN dropped: a new shout began before `SBF_ReadyStart`", ElapsedMs());
             }
 
             g_state.shoutActive = true;
@@ -3222,7 +3223,7 @@ namespace ShoutMCO {
                 // line is the only place that fact appears.
                 if (g_state.shoutActive) {
                     SHOUTMCO_TRACE("[{:10.2f}] >>> READY pass under a live shout -- ignored. A shout ends "
-                          "at `SBF_ShoutStop`, not at `inRdy`", ElapsedMs());
+                          "at `SBF_ShoutStop`, not at `SBF_ReadyStart`", ElapsedMs());
                 }
                 return;
             }
@@ -3231,7 +3232,7 @@ namespace ShoutMCO {
             g_state.awaitingReady = false;
 
             if (since > static_cast<double>(a_settings.readyWindowMs)) {
-                SHOUTMCO_TRACE("[{:10.2f}] >>> CHAIN dropped: `inRdy` came {:.1f}ms after the cut (cap {}ms)",
+                SHOUTMCO_TRACE("[{:10.2f}] >>> CHAIN dropped: `SBF_ReadyStart` came {:.1f}ms after the cut (cap {}ms)",
                       ElapsedMs(), since, a_settings.readyWindowMs);
                 return;
             }
@@ -3830,8 +3831,8 @@ namespace ShoutMCO {
     }
 
     bool ShoutChainEngine::IsInteresting(std::string_view a_tag) {
-        // `inRdy` is the attack-queued release tag and was traced without GraphSummary.
-        if (a_tag == "inRdy"sv) return true;
+        // The ready event is the attack-queued release tag and was traced without GraphSummary.
+        if (a_tag == kReadyEvent) return true;
         static constexpr std::string_view kNeedles[]{
             "hout"sv,    // shoutRelease, shoutStop, ShoutSprint*, shoutReleaseSlowTime
             "SHOUT_"sv,  // our own vocabulary, once the C3 patch declares it
@@ -3899,7 +3900,7 @@ namespace ShoutMCO {
         bool firstPerson = false;
 
         const bool isEndMarker =
-            tag == "MCO_AttackExitNotify"sv || tag == "attackStop"sv || tag == "inRdy"sv;
+            tag == "MCO_AttackExitNotify"sv || tag == "attackStop"sv || tag == kReadyEvent;
         // State Behavior Framework's exit annotation on the shout state, and the ONLY event that
         // ends a shout other than vanilla's own `shoutStop`. It reaches
         // here without any change to `IsNoise` or `IsInteresting` -- the "hout" needle already
@@ -4351,7 +4352,7 @@ namespace ShoutMCO {
                     emit.lockValue = 1;
                     emit.raiseRoot = true;
                 }
-            } else if (tag == "inRdy"sv) {
+            } else if (tag == kReadyEvent) {
                 // Handled whatever the enabled state, so a toggle flipped mid-shout cannot
                 // strand an armed chain.
                 OnReadyLocked(*settings, emit);

@@ -5,8 +5,8 @@
 // The attack tracker opens on `MCO_AttackInitiate` / `MCO_PowerAttackInitiate`. BFCO raises
 // neither, so under BFCO a shout pressed mid-swing found the tracker shut and went straight to the
 // game, which tore the swing down ~3 ms later. Every event AFTER the start -- `HitFrame`,
-// `attackStop`, `inRdy` -- BFCO does raise, so the hit-frame cut and the `IsAttacking`-falls
-// release already work there; only the start was missing.
+// `attackStop`, the ready event (`ReadyEvent.h`) -- a BFCO graph does raise, so the hit-frame cut
+// and the `IsAttacking`-falls release already work there; only the start was missing.
 //
 // BFCO has no clean start event to key off instead. `BFCO_PlayerAttackStart` fires AFTER the hit,
 // and `Bfco_AttackStartFX` / `preHitFrame` do not pair one-to-one with hits (613 and 824 against
