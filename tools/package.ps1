@@ -35,6 +35,9 @@ param(
     # Skip the animation-pack verifier. Present so a diagnosis run is possible, not so a release
     # can skip it.
     [switch]$SkipPackVerify,
+    # Replace a staged build of this same version that came from a different commit. Off by
+    # default: see the guard before the stage directory is deleted.
+    [switch]$Replace,
     [string]$ModsRoot = 'C:\Nolvus\Instances\Nolvus Awakening\MODS\mods'
 )
 
@@ -74,8 +77,8 @@ $ModName  = "Thu'um Reborn"
 $PackRoot = Join-Path $RepoRoot 'pack'
 
 # The internal OAR folder name is NOT the mod name and must not be renamed to match it. Every
-# Thunderchild alias resolves overrideAnimationsFolder relative to this directory, so renaming it
-# silently breaks all 29 of them.
+# modded-shout alias (tools/shout-alias-maps/) resolves overrideAnimationsFolder relative to this
+# directory, so renaming it silently breaks all of them.
 $OarRoot  = 'meshes\actors\character\animations\OpenAnimationReplacer\Thuum Reborn'
 
 # Read the version from CMakeLists rather than carrying a second copy of it. Two places to edit is
@@ -230,6 +233,45 @@ if ($illegalOar.Count -gt 0) {
           (($illegalOar | ForEach-Object { $_.FullName.Substring($SourceOar.Length + 1) }) -join "`n  ")
 }
 
+# A STAGED BUILD OF THIS VERSION FROM ANOTHER COMMIT IS NOT OURS TO DELETE. The version only moves
+# when CMakeLists does, so between releases every dev run lands on the last published version's
+# folder and archive. -AllowDirty did not stop that: on 2026-11-02 a dev run replaced the published
+# 1.0.5 build and zip (restored from Nexus). Each artifact's README Build line names its commit, and
+# the folder and the zip are checked separately: either can exist without the other.
+#
+# The MOD FOLDER keeps the real name, apostrophe and all -- that is what MO2 and the player see.
+# The ARCHIVE does not: a naive "replace spaces with dashes" turned "Thu'um - Fully Animated
+# Shouts Reborn" into "Thu'um---Fully-Animated-Shouts-Reborn", and an apostrophe in a download
+# filename is a nuisance in browsers, shells and mod managers alike. So drop apostrophes, collapse
+# the " - " separator, and squeeze any run of dashes back to one.
+$ArchiveStem = ($ModName -replace "'", '' -replace '\s*-\s*', ' ' -replace '\s+', '-' -replace '-+', '-')
+$Archive = Join-Path $StageRoot "$ArchiveStem-$Version.zip"
+$BuildPattern = '(?m)^Build: \S+, commit (\S+),'
+if (-not $Replace) {
+    $owners = @()
+    $StagedReadme = Join-Path $StageDir 'README.txt'
+    if (Test-Path $StagedReadme) {
+        $owners += ,@("release\$(Split-Path -Leaf $StageDir)", (Get-Content $StagedReadme -Raw))
+    } elseif (Test-Path $StageDir) {
+        $owners += ,@("release\$(Split-Path -Leaf $StageDir)", '')
+    }
+    if (Test-Path $Archive) {
+        Add-Type -AssemblyName System.IO.Compression.FileSystem
+        $zip = [System.IO.Compression.ZipFile]::OpenRead($Archive)
+        try {
+            $entry = $zip.GetEntry('README.txt')
+            $text = if ($entry) { (New-Object System.IO.StreamReader($entry.Open())).ReadToEnd() } else { '' }
+        } finally { $zip.Dispose() }
+        $owners += ,@("release\$(Split-Path -Leaf $Archive)", $text)
+    }
+    foreach ($owner in $owners) {
+        $ownerCommit = if ($owner[1] -match $BuildPattern) { $Matches[1] } else { '(unstamped)' }
+        if ($ownerCommit -ne $Commit) {
+            throw "$($owner[0]) holds a $Version build from commit $ownerCommit, and this run is $Commit. Bump VERSION in CMakeLists.txt for a new build, or re-run with -Replace to discard that one."
+        }
+    }
+}
+
 if (Test-Path $StageDir) { Remove-Item $StageDir -Recurse -Force }
 New-Item -ItemType Directory -Path $StageDir -Force | Out-Null
 
@@ -318,13 +360,6 @@ Build: $Version, commit $Commit, packaged $(Get-Date -Format 'yyyy-MM-dd HH:mm')
 "@ | Add-Content -Path $stagedReadme -Encoding UTF8
 Write-Host "  stamped README.txt: $Version, commit $Commit"
 
-# The MOD FOLDER keeps the real name, apostrophe and all -- that is what MO2 and the player see.
-# The ARCHIVE does not: a naive "replace spaces with dashes" turned "Thu'um - Fully Animated
-# Shouts Reborn" into "Thu'um---Fully-Animated-Shouts-Reborn", and an apostrophe in a download
-# filename is a nuisance in browsers, shells and mod managers alike. So drop apostrophes, collapse
-# the " - " separator, and squeeze any run of dashes back to one.
-$ArchiveStem = ($ModName -replace "'", '' -replace '\s*-\s*', ' ' -replace '\s+', '-' -replace '-+', '-')
-$Archive = Join-Path $StageRoot "$ArchiveStem-$Version.zip"
 if (Test-Path $Archive) { Remove-Item $Archive -Force }
 Compress-Archive -Path (Join-Path $StageDir '*') -DestinationPath $Archive
 

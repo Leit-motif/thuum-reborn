@@ -23,6 +23,21 @@ COMPATIBILITY
 
   * Thunderchild - Epic Shouts -- supported, detected if present.
 
+  * Stormcrown or Forceful Tongue -- supported, detected if present. The vanilla shouts they
+    rebalance keep their animations. Stormcrown's Lightning Breath and Poison Breath use the
+    breath animation; Forceful Tongue's Phantom Form uses Become Ethereal's. Both rebalance
+    the same vanilla shouts; each was tested on its own.
+
+  * New shouts from Thoom, Echoes of Power, Wyrmstooth, Falskaar, Midwood Isle and Draconic
+    Magic's Skyfall add-on -- each plays the animation of the vanilla shout it works most like.
+    Detected if present.
+
+  * Draconic Magic's breath shouts (Inferno, Sleetstorm and the Diverse Dragons breaths) --
+    play the default shout animation. Their third word is a held breath, and nothing here
+    animates one.
+
+  * Any other mod's new shout -- plays the default shout animation.
+
   * First person -- shouts play their vanilla animation and this mod stays out of the
     way. Everything here is a third-person change.
 
